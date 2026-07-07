@@ -1,0 +1,26 @@
+{
+  "name": "@routemind/routing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@routemind/cost-engine": "0.1.0",
+    "@routemind/core": "0.1.0",
+    "@routemind/providers": "0.1.0"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1"
+  }
+}

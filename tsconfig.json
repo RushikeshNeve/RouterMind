@@ -1,0 +1,41 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/shared"
+    },
+    {
+      "path": "packages/observability"
+    },
+    {
+      "path": "packages/providers"
+    },
+    {
+      "path": "packages/routing"
+    },
+    {
+      "path": "packages/auth"
+    },
+    {
+      "path": "packages/analytics"
+    },
+    {
+      "path": "packages/cost-engine"
+    },
+    {
+      "path": "packages/policy-engine"
+    },
+    {
+      "path": "packages/sdk"
+    },
+    {
+      "path": "apps/dashboard"
+    },
+    {
+      "path": "apps/api"
+    }
+  ]
+}
