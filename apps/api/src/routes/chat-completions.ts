@@ -278,7 +278,11 @@ export function registerChatCompletionRoutes(
         );
       }
 
-      const cachePlan = buildCachePlan(parsed.data.cache, parsed.data.stream, parsed.data.temperature);
+      const cachePlan = buildCachePlan(
+        parsed.data.cache,
+        parsed.data.stream,
+        parsed.data.temperature,
+      );
       const cacheKey =
         cachePlan.lookupMode === "exact"
           ? dependencies.cacheService.buildCacheKey({
@@ -533,13 +537,13 @@ export function registerChatCompletionRoutes(
               quotaRemainingTokens: guardrailCheck.quotaRemainingTokens,
             };
             const resilience = buildResilienceMetadata({
-                primaryProvider: effectivePrimaryProvider,
-                primaryModel: effectivePrimaryModel,
-                finalProvider: candidate.provider,
-                finalModel: candidate.model,
-                circuitBreakerTriggered: fallbackOrder.circuitBreakerTriggered,
-                attempts,
-              });
+              primaryProvider: effectivePrimaryProvider,
+              primaryModel: effectivePrimaryModel,
+              finalProvider: candidate.provider,
+              finalModel: candidate.model,
+              circuitBreakerTriggered: fallbackOrder.circuitBreakerTriggered,
+              attempts,
+            });
             const errorType =
               guardrailCheck.errorCode === "QUOTA_EXCEEDED"
                 ? "rate_limit_error"
@@ -722,13 +726,13 @@ export function registerChatCompletionRoutes(
         });
 
         const resilience = buildResilienceMetadata({
-            primaryProvider: effectivePrimaryProvider,
-            primaryModel: effectivePrimaryModel,
-            finalProvider,
-            finalModel,
-            circuitBreakerTriggered: fallbackOrder.circuitBreakerTriggered,
-            attempts,
-          });
+          primaryProvider: effectivePrimaryProvider,
+          primaryModel: effectivePrimaryModel,
+          finalProvider,
+          finalModel,
+          circuitBreakerTriggered: fallbackOrder.circuitBreakerTriggered,
+          attempts,
+        });
         const executionPlan = buildExecutionPlanMetadata(effectivePlannerDecision, true, 0);
 
         return reply.status(502).send({
@@ -933,12 +937,7 @@ function buildCachePlan(
   temperature?: number,
 ): CachePlan {
   const requestedMode = options.mode ?? "exact";
-  if (
-    requestedMode === "disabled" ||
-    options.bypass ||
-    stream ||
-    (temperature ?? 0) > 0.7
-  ) {
+  if (requestedMode === "disabled" || options.bypass || stream || (temperature ?? 0) > 0.7) {
     return { requestedMode };
   }
 
@@ -957,7 +956,10 @@ function shouldStoreCache(
   return Boolean(buildCachePlan(options, stream, temperature).lookupMode);
 }
 
-function attachCacheMetadata(responseJson: unknown, cache: CacheResponseMetadata): Record<string, unknown> {
+function attachCacheMetadata(
+  responseJson: unknown,
+  cache: CacheResponseMetadata,
+): Record<string, unknown> {
   const response = cloneRecord(responseJson);
   const metadata = isUnknownRecord(response.metadata) ? response.metadata : {};
   const routemind = isUnknownRecord(response.routemind) ? response.routemind : {};
@@ -1082,10 +1084,7 @@ function extractApiKey(request: FastifyRequest): string | undefined {
 function openAiError(input: {
   readonly message: string;
   readonly type:
-    | "invalid_request_error"
-    | "authentication_error"
-    | "rate_limit_error"
-    | "server_error";
+    "invalid_request_error" | "authentication_error" | "rate_limit_error" | "server_error";
   readonly code: string;
   readonly issues?: unknown;
   readonly routingMetadata?: unknown;

@@ -118,7 +118,10 @@ console.log(summary.requests.total, summary.cost.totalSpendUsd);
 const health = await client.health.providers.list();
 
 for (const provider of health.providers) {
-  console.log(provider.provider, provider.models.map((model) => model.status));
+  console.log(
+    provider.provider,
+    provider.models.map((model) => model.status),
+  );
 }
 ```
 

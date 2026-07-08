@@ -157,32 +157,32 @@ export class InMemoryAnalyticsService implements AnalyticsService {
     );
   }
 
-  async models(filters: AnalyticsFilters): Promise<readonly ModelAnalyticsRow[]> {
-    return groupModels(this.snapshot(filters).requests);
+  models(filters: AnalyticsFilters): Promise<readonly ModelAnalyticsRow[]> {
+    return Promise.resolve(groupModels(this.snapshot(filters).requests));
   }
 
-  async providers(filters: AnalyticsFilters): Promise<readonly ProviderAnalyticsRow[]> {
-    return groupProviders(this.snapshot(filters).requests);
+  providers(filters: AnalyticsFilters): Promise<readonly ProviderAnalyticsRow[]> {
+    return Promise.resolve(groupProviders(this.snapshot(filters).requests));
   }
 
-  async errors(filters: AnalyticsFilters): Promise<readonly ErrorAnalyticsRow[]> {
+  errors(filters: AnalyticsFilters): Promise<readonly ErrorAnalyticsRow[]> {
     const data = this.snapshot(filters);
-    return groupErrors(data.requests, data.attempts);
+    return Promise.resolve(groupErrors(data.requests, data.attempts));
   }
 
-  async costs(filters: AnalyticsFilters): Promise<readonly CostAnalyticsRow[]> {
-    return groupCosts(this.snapshot(filters).requests);
+  costs(filters: AnalyticsFilters): Promise<readonly CostAnalyticsRow[]> {
+    return Promise.resolve(groupCosts(this.snapshot(filters).requests));
   }
 
-  async latency(filters: AnalyticsFilters): Promise<readonly LatencyAnalyticsRow[]> {
-    return groupLatency(this.snapshot(filters).requests);
+  latency(filters: AnalyticsFilters): Promise<readonly LatencyAnalyticsRow[]> {
+    return Promise.resolve(groupLatency(this.snapshot(filters).requests));
   }
 
-  async requests(
+  requests(
     filters: AnalyticsFilters,
     limit: number,
   ): Promise<readonly RecentRequestAnalyticsRow[]> {
-    return recentRequests(this.snapshot(filters).requests, limit);
+    return Promise.resolve(recentRequests(this.snapshot(filters).requests, limit));
   }
 
   private snapshot(filters: AnalyticsFilters): AnalyticsSnapshot {

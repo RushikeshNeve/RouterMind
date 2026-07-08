@@ -192,74 +192,100 @@ function createMockClient(): RouteMindClient {
     },
     health: {
       providers: {
-        list: vi.fn(async () => ({
-          providers: [
-            {
-              provider: "openai",
-              models: [
-                {
-                  model: "gpt-4o",
-                  status: "healthy",
-                  avgLatencyMs: 1320,
-                  p95LatencyMs: 1900,
-                  successRate: 0.99,
-                  errorRate: 0.01,
-                  timeoutRate: 0,
-                  rateLimitRate: 0,
-                  sampleSize: 100,
-                  lastCheckedAt: "2026-07-07T00:00:00.000Z",
-                  updatedAt: "2026-07-07T00:00:00.000Z",
-                },
-              ],
-            },
-          ],
-        })),
+        list: vi.fn(() =>
+          Promise.resolve({
+            providers: [
+              {
+                provider: "openai",
+                models: [
+                  {
+                    model: "gpt-4o",
+                    status: "healthy",
+                    avgLatencyMs: 1320,
+                    p95LatencyMs: 1900,
+                    successRate: 0.99,
+                    errorRate: 0.01,
+                    timeoutRate: 0,
+                    rateLimitRate: 0,
+                    sampleSize: 100,
+                    lastCheckedAt: "2026-07-07T00:00:00.000Z",
+                    updatedAt: "2026-07-07T00:00:00.000Z",
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
       },
     },
     analytics: {
-      summary: vi.fn(async () => ({
-        range: {},
-        requests: { total: 10, success: 9, failed: 1, successRate: 0.9 },
-        cost: { totalSpendUsd: 1.23, averageCostPerRequest: 0.123 },
-        tokens: { input: 100, output: 50, total: 150 },
-        latency: { averageMs: 1000, p95Ms: 1800 },
-        routing: { fallbackUsed: 1, llmAssisted: 8, scoreBased: 1, ruleBased: 1 },
-        guardrails: { budgetBlocked: 0, quotaBlocked: 0 },
-      })),
+      summary: vi.fn(() =>
+        Promise.resolve({
+          range: {},
+          requests: { total: 10, success: 9, failed: 1, successRate: 0.9 },
+          cost: { totalSpendUsd: 1.23, averageCostPerRequest: 0.123 },
+          tokens: { input: 100, output: 50, total: 150 },
+          latency: { averageMs: 1000, p95Ms: 1800 },
+          routing: { fallbackUsed: 1, llmAssisted: 8, scoreBased: 1, ruleBased: 1 },
+          guardrails: { budgetBlocked: 0, quotaBlocked: 0 },
+        }),
+      ),
     },
     resilience: {
       circuitBreakers: {
-        list: vi.fn(async () => ({ circuitBreakers: [] })),
+        list: vi.fn(() => Promise.resolve({ circuitBreakers: [] })),
       },
     },
   };
 }
 
-async function* createMockStream() {
-  yield {
-    id: "chatcmpl_cli_stream",
-    object: "chat.completion.chunk" as const,
-    created: 123,
-    model: "gpt-4o",
-    choices: [
-      {
-        index: 0,
-        delta: { content: "Streaming " },
-        finish_reason: null,
-      },
-    ],
-  };
-  yield {
-    id: "chatcmpl_cli_stream",
-    object: "chat.completion.chunk" as const,
-    created: 123,
-    model: "gpt-4o",
-    choices: [
-      {
-        index: 0,
-        delta: { content: "works" },
-        finish_reason: null,
-      },
-    ],
-  };
+function createMockStream(): AsyncGenerator<{
+  readonly id: string;
+  readonly object: "chat.completion.chunk";
+  readonly created: number;
+  readonly model: string;
+  readonly choices: readonly {
+    readonly index: number;
+    readonly delta: { readonly content: string };
+    readonly finish_reason: null;
+  }[];
+}> {
+  return (function* () {
+    yield {
+      id: "chatcmpl_cli_stream",
+      object: "chat.completion.chunk" as const,
+      created: 123,
+      model: "gpt-4o",
+      choices: [
+        {
+          index: 0,
+          delta: { content: "Streaming " },
+          finish_reason: null,
+        },
+      ],
+    };
+    yield {
+      id: "chatcmpl_cli_stream",
+      object: "chat.completion.chunk" as const,
+      created: 123,
+      model: "gpt-4o",
+      choices: [
+        {
+          index: 0,
+          delta: { content: "works" },
+          finish_reason: null,
+        },
+      ],
+    };
+  })() as unknown as AsyncGenerator<{
+    readonly id: string;
+    readonly object: "chat.completion.chunk";
+    readonly created: number;
+    readonly model: string;
+    readonly choices: readonly {
+      readonly index: number;
+      readonly delta: { readonly content: string };
+      readonly finish_reason: null;
+    }[];
+  }>;
 }

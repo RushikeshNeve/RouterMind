@@ -414,7 +414,7 @@ async function writeChatStream(
   }
 }
 
-function isChatCompletionChunk(chunk: ChatCompletionChunk | unknown): chunk is ChatCompletionChunk {
+function isChatCompletionChunk(chunk: unknown): chunk is ChatCompletionChunk {
   return (
     typeof chunk === "object" &&
     chunk !== null &&
@@ -435,9 +435,10 @@ function formatHealth(response: ProviderHealthResponse): string {
     ]),
   );
 
-  return [chalk.bold("Provider Health"), formatTable(["Provider", "Model", "Status", "Avg", "Success", "N"], rows)].join(
-    "\n",
-  );
+  return [
+    chalk.bold("Provider Health"),
+    formatTable(["Provider", "Model", "Status", "Avg", "Success", "N"], rows),
+  ].join("\n");
 }
 
 function formatModels(response: ProviderHealthResponse): string {
@@ -451,7 +452,10 @@ function formatModels(response: ProviderHealthResponse): string {
     ]),
   );
 
-  return [chalk.bold("Models"), formatTable(["Provider", "Model", "Status", "P95", "Errors"], rows)].join("\n");
+  return [
+    chalk.bold("Models"),
+    formatTable(["Provider", "Model", "Status", "P95", "Errors"], rows),
+  ].join("\n");
 }
 
 function formatAnalytics(summary: AnalyticsSummary): string {

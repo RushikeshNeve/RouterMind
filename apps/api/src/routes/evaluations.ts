@@ -1,10 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import type {
-  EvaluationScoringMode,
-  EvaluationService,
-} from "../infrastructure/evaluation-service.js";
+import type { EvaluationService } from "../infrastructure/evaluation-service.js";
 
 const chatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
@@ -68,7 +65,7 @@ export function registerEvaluationRoutes(
           datasetId: params.data.datasetId,
           inputMessagesJson: body.data.inputMessagesJson,
           expectedOutput: body.data.expectedOutput,
-          gradingRubric: body.data.gradingRubric as EvaluationScoringMode,
+          gradingRubric: body.data.gradingRubric,
           metadataJson: body.data.metadataJson,
         }),
       );

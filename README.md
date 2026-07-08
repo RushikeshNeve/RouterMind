@@ -427,12 +427,7 @@ Registered chat models include:
 The SDK package lives at `packages/sdk` and is prepared for the public npm package name `@routemind/sdk`.
 
 ```ts
-import {
-  BudgetExceededError,
-  RateLimitError,
-  RouteMind,
-  RouteMindError,
-} from "@routemind/sdk";
+import { BudgetExceededError, RateLimitError, RouteMind, RouteMindError } from "@routemind/sdk";
 
 const client = new RouteMind({
   apiKey: process.env.ROUTEMIND_API_KEY,

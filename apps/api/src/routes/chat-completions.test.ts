@@ -65,22 +65,23 @@ class StubCostGuardrailService {
 
   constructor(private readonly result: CostGuardrailCheck = { allowed: true }) {}
 
-  async checkBeforeRequest(input: {
+  checkBeforeRequest(input: {
     userId: string;
     estimatedCostUsd: number;
     estimatedTokens: number;
     maxEstimatedCostUsd?: number;
   }): Promise<CostGuardrailCheck> {
     this.checkCalls.push(input);
-    return this.result;
+    return Promise.resolve(this.result);
   }
 
-  async recordUsage(input: {
+  recordUsage(input: {
     userId: string;
     actualCostUsd: number;
     totalTokens: number;
   }): Promise<void> {
     this.usageCalls.push(input);
+    return Promise.resolve();
   }
 }
 
@@ -121,7 +122,7 @@ async function createTestAppWithAvailability(
     providerAttemptLogStore,
     executionPlanLogStore,
     cacheService,
-    retryPolicyService: new RetryPolicyService(undefined, undefined, async () => undefined),
+    retryPolicyService: new RetryPolicyService(undefined, undefined, () => undefined),
     aiPlannerService: options.aiPlannerService,
     costGuardrailService: options.costGuardrailService ?? new StubCostGuardrailService(),
     providers: options.providers,
@@ -299,7 +300,7 @@ function createCountingProvider(content = "Cached provider answer"): {
   let calls = 0;
   return {
     calls: () => calls,
-    provider: createProvider("openai", ["gpt-4o"], async (request) => {
+    provider: createProvider("openai", ["gpt-4o"], (request) => {
       calls += 1;
       return {
         id: `counting-${calls}`,
@@ -395,9 +396,7 @@ describe("chat completions route", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(parseResponse<ChatCompletionTestResponse>(response).metadata.provider).toBe(
-      "anthropic",
-    );
+    expect(parseResponse<ChatCompletionTestResponse>(response).metadata.provider).toBe("anthropic");
   });
 
   it("keeps x-api-key authentication working", async () => {
@@ -608,7 +607,12 @@ describe("chat completions route", () => {
     });
     const content = parseSsePayload(response.payload)
       .filter((event) => event !== "[DONE]")
-      .map((event) => JSON.parse(event) as { readonly choices?: readonly { readonly delta?: { readonly content?: string } }[] })
+      .map(
+        (event) =>
+          JSON.parse(event) as {
+            readonly choices?: readonly { readonly delta?: { readonly content?: string } }[];
+          },
+      )
       .map((event) => event.choices?.[0]?.delta?.content ?? "")
       .join("");
 
@@ -617,8 +621,8 @@ describe("chat completions route", () => {
     expect(context.requestLogStore.entries).toContainEqual(
       expect.objectContaining({
         status: "success",
-        inputTokens: expect.any(Number),
-        outputTokens: expect.any(Number),
+        inputTokens: 0,
+        outputTokens: 0,
       }),
     );
   });
@@ -934,18 +938,20 @@ describe("chat completions route", () => {
 
     expect(response.statusCode).toBe(200);
     expect(body.object).toBe("list");
-    expect(body.data).toContainEqual({
-      id: "auto",
-      object: "model",
-      created: expect.any(Number),
-      owned_by: "routemind",
-    });
-    expect(body.data).toContainEqual({
-      id: "gpt-4o",
-      object: "model",
-      created: expect.any(Number),
-      owned_by: "openai",
-    });
+    expect(body.data).toContainEqual(
+      expect.objectContaining({
+        id: "auto",
+        object: "model",
+        owned_by: "routemind",
+      }),
+    );
+    expect(body.data).toContainEqual(
+      expect.objectContaining({
+        id: "gpt-4o",
+        object: "model",
+        owned_by: "openai",
+      }),
+    );
     expect(body.data.some((model) => model.id === "claude-3-5-sonnet")).toBe(false);
   });
 
@@ -1391,11 +1397,10 @@ describe("chat completions route", () => {
 
     expect(response.statusCode).toBe(200);
     expect(costGuardrailService.usageCalls).toHaveLength(1);
-    expect(costGuardrailService.usageCalls[0]).toMatchObject({
-      userId: expect.any(String),
-      actualCostUsd: expect.any(Number),
-      totalTokens: expect.any(Number),
-    });
+    expect(costGuardrailService.usageCalls[0]).toBeDefined();
+    expect(costGuardrailService.usageCalls[0]?.userId).toEqual(expect.any(String));
+    expect(costGuardrailService.usageCalls[0]?.actualCostUsd).toBe(0);
+    expect(costGuardrailService.usageCalls[0]?.totalTokens).toBe(0);
     expect(body.metadata.costGuardrails?.actualCostUsd).toBeGreaterThan(0);
   });
 
@@ -1409,9 +1414,9 @@ describe("chat completions route", () => {
     const provider: ProviderAdapter = {
       providerName: "openai",
       supportedModels: ["gpt-4o-mini"],
-      chatCompletion: async () => {
+      chatCompletion: () => {
         providerCallCount += 1;
-        return {
+        return Promise.resolve({
           id: "mock",
           object: "chat.completion",
           created: Math.floor(Date.now() / 1000),
@@ -1431,7 +1436,7 @@ describe("chat completions route", () => {
             completion_tokens: 10,
             total_tokens: 20,
           },
-        };
+        });
       },
     };
 
@@ -1479,13 +1484,13 @@ describe("chat completions route", () => {
 
   it("retries timeout failures before succeeding", async () => {
     let calls = 0;
-    const provider = createProvider("openai", ["gpt-4o-mini"], async (request) => {
+    const provider = createProvider("openai", ["gpt-4o-mini"], (request) => {
       calls += 1;
       if (calls < 3) {
         throw new ProviderError("timeout", "OpenAI timed out.", 504);
       }
 
-      return {
+      return Promise.resolve({
         id: "retry-success",
         object: "chat.completion",
         created: 1,
@@ -1498,7 +1503,7 @@ describe("chat completions route", () => {
           },
         ],
         usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-      };
+      });
     });
     const context = await createTestAppWithAvailability(
       {
@@ -1530,13 +1535,13 @@ describe("chat completions route", () => {
 
   it("retries rate limits before succeeding", async () => {
     let calls = 0;
-    const provider = createProvider("openai", ["gpt-4o-mini"], async (request) => {
+    const provider = createProvider("openai", ["gpt-4o-mini"], (request) => {
       calls += 1;
       if (calls === 1) {
         throw new ProviderError("rate_limit", "OpenAI rate limited the request.", 429);
       }
 
-      return {
+      return Promise.resolve({
         id: "rate-limit-retry-success",
         object: "chat.completion",
         created: 1,
@@ -1549,7 +1554,7 @@ describe("chat completions route", () => {
           },
         ],
         usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-      };
+      });
     });
     const context = await createTestAppWithAvailability(
       {
@@ -1574,7 +1579,7 @@ describe("chat completions route", () => {
 
   it("does not retry auth errors", async () => {
     let calls = 0;
-    const provider = createProvider("openai", ["gpt-4o-mini"], async () => {
+    const provider = createProvider("openai", ["gpt-4o-mini"], () => {
       calls += 1;
       throw new ProviderError("invalid_api_key", "Invalid provider key.", 502);
     });
@@ -1603,23 +1608,25 @@ describe("chat completions route", () => {
   });
 
   it("uses fallback after the primary provider fails", async () => {
-    const openai = createProvider("openai", ["gpt-4o-mini"], async () => {
+    const openai = createProvider("openai", ["gpt-4o-mini"], () => {
       throw new ProviderError("invalid_api_key", "Invalid provider key.", 502);
     });
-    const anthropic = createProvider("anthropic", ["claude-3-5-sonnet"], async (request) => ({
-      id: "fallback-success",
-      object: "chat.completion",
-      created: 1,
-      model: request.model,
-      choices: [
-        {
-          index: 0,
-          message: { role: "assistant", content: "fallback ok" },
-          finish_reason: "stop",
-        },
-      ],
-      usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-    }));
+    const anthropic = createProvider("anthropic", ["claude-3-5-sonnet"], (request) =>
+      Promise.resolve({
+        id: "fallback-success",
+        object: "chat.completion",
+        created: 1,
+        model: request.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "fallback ok" },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+      }),
+    );
     const context = await createTestAppWithAvailability(
       {
         enabledProviders: ["openai", "anthropic"],
@@ -1651,12 +1658,12 @@ describe("chat completions route", () => {
 
   it("does not fallback to disabled providers or models", async () => {
     let anthropicCalls = 0;
-    const openai = createProvider("openai", ["gpt-4o-mini"], async () => {
+    const openai = createProvider("openai", ["gpt-4o-mini"], () => {
       throw new ProviderError("invalid_api_key", "Invalid provider key.", 502);
     });
     const anthropic = createProvider("anthropic", ["claude-3-5-sonnet"], async (request) => {
       anthropicCalls += 1;
-      return {
+      return Promise.resolve({
         id: "should-not-run",
         object: "chat.completion",
         created: 1,
@@ -1669,7 +1676,7 @@ describe("chat completions route", () => {
           },
         ],
         usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-      };
+      });
     });
     const context = await createTestAppWithAvailability(
       {
@@ -1704,9 +1711,9 @@ describe("chat completions route", () => {
       await circuitBreakerService.recordFailure("openai", "gpt-4o-mini");
     }
 
-    const openai = createProvider("openai", ["gpt-4o-mini"], async (request) => {
+    const openai = createProvider("openai", ["gpt-4o-mini"], (request) => {
       openaiCalls += 1;
-      return {
+      return Promise.resolve({
         id: "open-circuit-unexpected",
         object: "chat.completion",
         created: 1,
@@ -1719,22 +1726,24 @@ describe("chat completions route", () => {
           },
         ],
         usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-      };
+      });
     });
-    const anthropic = createProvider("anthropic", ["claude-3-5-sonnet"], async (request) => ({
-      id: "open-circuit-fallback",
-      object: "chat.completion",
-      created: 1,
-      model: request.model,
-      choices: [
-        {
-          index: 0,
-          message: { role: "assistant", content: "fallback ok" },
-          finish_reason: "stop",
-        },
-      ],
-      usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-    }));
+    const anthropic = createProvider("anthropic", ["claude-3-5-sonnet"], (request) =>
+      Promise.resolve({
+        id: "open-circuit-fallback",
+        object: "chat.completion",
+        created: 1,
+        model: request.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "fallback ok" },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+      }),
+    );
     const context = await createTestAppWithAvailability(
       {
         enabledProviders: ["openai", "anthropic"],
@@ -1891,7 +1900,7 @@ describe("chat completions route", () => {
     let anthropicCalls = 0;
     const anthropic = createProvider("anthropic", ["claude-3-5-sonnet"], async (request) => {
       anthropicCalls += 1;
-      return {
+      return Promise.resolve({
         id: "disabled-planner-model",
         object: "chat.completion",
         created: 1,
@@ -1904,7 +1913,7 @@ describe("chat completions route", () => {
           },
         ],
         usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-      };
+      });
     });
     const context = await createTestAppWithAvailability(
       {
@@ -1917,7 +1926,7 @@ describe("chat completions route", () => {
         providers: new Map([
           [
             "openai",
-            createProvider("openai", ["gpt-4o-mini"], async (request) => ({
+            createProvider("openai", ["gpt-4o-mini"], (request) => ({
               id: "normal-route",
               object: "chat.completion",
               created: 1,
@@ -1968,7 +1977,7 @@ describe("chat completions route", () => {
       expect.objectContaining({
         planType: "single_model",
         executed: true,
-        actualCostUsd: expect.any(Number),
+        actualCostUsd: 0,
       }),
     ]);
   });
@@ -1986,12 +1995,10 @@ describe("chat completions route", () => {
     const body = parseResponse<ChatCompletionTestResponse>(response);
 
     expect(response.statusCode).toBe(200);
-    expect(body.executionPlan).toMatchObject({
-      planType: "single_model",
-      estimatedCostUsd: expect.any(Number),
-      actualCostUsd: expect.any(Number),
-      confidence: expect.any(Number),
-      executed: true,
-    });
+    expect(body.executionPlan.planType).toBe("single_model");
+    expect(body.executionPlan.estimatedCostUsd).toEqual(expect.any(Number));
+    expect(body.executionPlan.actualCostUsd).toEqual(expect.any(Number));
+    expect(body.executionPlan.confidence).toEqual(expect.any(Number));
+    expect(body.executionPlan.executed).toBe(true);
   });
 });

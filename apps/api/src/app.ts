@@ -15,10 +15,7 @@ import {
   InMemoryAnalyticsService,
   type AnalyticsService,
 } from "./infrastructure/analytics-service.js";
-import {
-  InMemoryCacheService,
-  type CacheService,
-} from "./infrastructure/cache-service.js";
+import { InMemoryCacheService, type CacheService } from "./infrastructure/cache-service.js";
 import type { CostGuardrailCheck } from "./infrastructure/cost-guardrail-service.js";
 import {
   InMemoryCircuitBreakerService,
@@ -151,8 +148,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const routerDecisionLogStore =
     options.routerDecisionLogStore ?? new InMemoryRouterDecisionLogStore();
   const evaluationService =
-    options.evaluationService ??
-    new InMemoryEvaluationService(new EchoEvaluationModelRunner());
+    options.evaluationService ?? new InMemoryEvaluationService(new EchoEvaluationModelRunner());
   const cacheService = options.cacheService ?? new InMemoryCacheService();
   const analyticsService =
     options.analyticsService ??
@@ -196,8 +192,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     config: options.config,
     authenticator,
     costGuardrailService: options.costGuardrailService ?? {
-      checkBeforeRequest: async () => ({ allowed: true }),
-      recordUsage: async () => undefined,
+      checkBeforeRequest: () => Promise.resolve({ allowed: true }),
+      recordUsage: () => Promise.resolve(undefined),
     },
     availabilityStore,
     rateLimiter: options.rateLimiter ?? new InMemoryRateLimiter(),

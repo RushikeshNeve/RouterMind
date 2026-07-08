@@ -98,7 +98,10 @@ describe("evaluation routes", () => {
     const evaluationService = new InMemoryEvaluationService(new StaticEvaluationRunner("Hello"));
     const app = await buildApp({ config: testConfig, evaluationService });
     apps.push(app);
-    const dataset = await evaluationService.createDataset({ name: "Exact", taskType: "simple_chat" });
+    const dataset = await evaluationService.createDataset({
+      name: "Exact",
+      taskType: "simple_chat",
+    });
     await evaluationService.addCase({
       datasetId: dataset.id,
       inputMessagesJson: [{ role: "user", content: "Say Hello" }],
@@ -116,7 +119,11 @@ describe("evaluation routes", () => {
       url: `/v1/evaluations/runs/${run.id}/start`,
     });
     const body = parseResponse<{
-      readonly run: { readonly status: string; readonly passedCases: number; readonly averageScore: number };
+      readonly run: {
+        readonly status: string;
+        readonly passedCases: number;
+        readonly averageScore: number;
+      };
       readonly results: readonly { readonly score: number; readonly passed: boolean }[];
     }>(response);
 
@@ -133,7 +140,10 @@ describe("evaluation routes", () => {
     );
     const app = await buildApp({ config: testConfig, evaluationService });
     apps.push(app);
-    const dataset = await evaluationService.createDataset({ name: "Contains", taskType: "summary" });
+    const dataset = await evaluationService.createDataset({
+      name: "Contains",
+      taskType: "summary",
+    });
     await evaluationService.addCase({
       datasetId: dataset.id,
       inputMessagesJson: [{ role: "user", content: "Case one" }],
@@ -168,7 +178,10 @@ describe("evaluation routes", () => {
     const evaluationService = new InMemoryEvaluationService(new StaticEvaluationRunner("ok"));
     const app = await buildApp({ config: testConfig, evaluationService });
     apps.push(app);
-    const dataset = await evaluationService.createDataset({ name: "Scores", taskType: "simple_chat" });
+    const dataset = await evaluationService.createDataset({
+      name: "Scores",
+      taskType: "simple_chat",
+    });
     await evaluationService.addCase({
       datasetId: dataset.id,
       inputMessagesJson: [{ role: "user", content: "ok" }],
@@ -184,7 +197,11 @@ describe("evaluation routes", () => {
 
     const response = await app.inject({ method: "GET", url: "/v1/evaluations/scores" });
     const body = parseResponse<{
-      readonly scores: readonly { readonly taskType: string; readonly model: string; readonly averageScore: number }[];
+      readonly scores: readonly {
+        readonly taskType: string;
+        readonly model: string;
+        readonly averageScore: number;
+      }[];
     }>(response);
 
     expect(body.scores).toContainEqual(
@@ -198,7 +215,10 @@ describe("evaluation routes", () => {
 
   it("passes evaluation scores into routing", async () => {
     const evaluationService = new InMemoryEvaluationService(new StaticEvaluationRunner("ok"));
-    const dataset = await evaluationService.createDataset({ name: "Routing", taskType: "debugging" });
+    const dataset = await evaluationService.createDataset({
+      name: "Routing",
+      taskType: "debugging",
+    });
     await evaluationService.addCase({
       datasetId: dataset.id,
       inputMessagesJson: [{ role: "user", content: "ok" }],

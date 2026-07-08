@@ -50,7 +50,8 @@ function serializeModels(modelIds: readonly string[]) {
     id: modelId,
     object: "model",
     created: MODEL_CREATED_AT,
-    owned_by: modelId === "auto" ? "routemind" : (getModelRegistryEntry(modelId)?.provider ?? "routemind"),
+    owned_by:
+      modelId === "auto" ? "routemind" : (getModelRegistryEntry(modelId)?.provider ?? "routemind"),
   }));
 }
 

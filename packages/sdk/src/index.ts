@@ -1,14 +1,16 @@
 export type ChatRole = "system" | "user" | "assistant";
-export type ProviderId = "openai" | "anthropic" | "gemini" | "groq" | string;
-export type RoutingMode = "rule_based" | "score_based" | "llm_assisted";
-export type RoutingStrategy = "cost_optimized" | "speed_optimized" | "quality_optimized" | "balanced" | string;
+export type ProviderId = "openai" | "anthropic" | "gemini" | "groq" | (string & {});
+export type RoutingMode = "rule_based" | "score_based" | "llm_assisted" | (string & {});
+export type RoutingStrategy =
+  "cost_optimized" | "speed_optimized" | "quality_optimized" | "balanced" | (string & {});
 export type ExecutionPlanType =
   | "auto"
   | "single_model"
   | "cheap_first"
   | "summarize_then_reason"
-  | "quality_first";
-export type CacheMode = "disabled" | "exact" | "semantic";
+  | "quality_first"
+  | (string & {});
+export type CacheMode = "disabled" | "exact" | "semantic" | (string & {});
 
 export interface RouteMindClientOptions {
   readonly apiKey?: string;
@@ -101,7 +103,7 @@ export interface ChatCompletionChunk {
       readonly role?: ChatRole;
       readonly content?: string;
     };
-    readonly finish_reason: "stop" | "length" | "content_filter" | null | string;
+    readonly finish_reason: "stop" | "length" | "content_filter" | null | (string & {});
   }[];
 }
 
@@ -117,7 +119,7 @@ export interface RouteMindStreamMetadata {
 export interface ChatCompletionChoice {
   readonly index: number;
   readonly message: ChatMessage;
-  readonly finish_reason: "stop" | "length" | "content_filter" | string;
+  readonly finish_reason: "stop" | "length" | "content_filter" | (string & {});
 }
 
 export interface ChatCompletionUsage {
@@ -141,7 +143,7 @@ export interface ChatCompletionMetadata {
 
 export interface CacheMetadata {
   readonly hit: boolean;
-  readonly mode: CacheMode | string;
+  readonly mode: CacheMode;
   readonly costSavedUsd?: number;
   readonly originalModel?: string;
   readonly originalProvider?: string;
@@ -155,7 +157,7 @@ export interface RoutingMetadata {
   readonly availableModels?: readonly string[];
   readonly unavailableReason?: string;
   readonly routingStrategy?: string;
-  readonly routingMode?: RoutingMode | string;
+  readonly routingMode?: RoutingMode;
   readonly fallbackUsed?: boolean;
   readonly candidates?: readonly RoutingCandidate[];
   readonly reason?: string;
@@ -180,14 +182,14 @@ export interface ProviderAttemptMetadata {
   readonly provider: string;
   readonly model: string;
   readonly attemptNumber: number;
-  readonly status: "success" | "failed" | string;
+  readonly status: "success" | "failed" | (string & {});
   readonly latencyMs?: number;
   readonly errorType?: string;
   readonly errorMessage?: string;
 }
 
 export interface ExecutionPlanMetadata {
-  readonly planType: ExecutionPlanType | string;
+  readonly planType: ExecutionPlanType;
   readonly steps: readonly ExecutionPlanStep[];
   readonly estimatedCostUsd: number;
   readonly actualCostUsd?: number | null;
@@ -254,7 +256,7 @@ export interface AnalyticsSummary {
 
 export interface ProviderHealthMetric {
   readonly model: string;
-  readonly status: "healthy" | "degraded" | "down" | string;
+  readonly status: "healthy" | "degraded" | "down" | (string & {});
   readonly avgLatencyMs: number;
   readonly p95LatencyMs: number;
   readonly successRate: number;
@@ -281,7 +283,7 @@ export interface CircuitBreaker {
   readonly id: string;
   readonly provider: string;
   readonly model: string;
-  readonly state: "closed" | "open" | "half_open" | string;
+  readonly state: "closed" | "open" | "half_open" | (string & {});
   readonly failureCount: number;
   readonly openedAt?: string;
   readonly halfOpenAt?: string;
@@ -614,7 +616,10 @@ export class RouteMind {
 
   private async requestOnce<TResponse>(path: string, config: RequestConfig): Promise<TResponse> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config.options?.timeoutMs ?? this.timeoutMs);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      config.options?.timeoutMs ?? this.timeoutMs,
+    );
     const url = buildUrl(this.baseUrl, path, config.query);
 
     try {
@@ -649,12 +654,12 @@ export class RouteMind {
     }
   }
 
-  private async *streamRequest(
-    path: string,
-    config: RequestConfig,
-  ): ChatCompletionStream {
+  private async *streamRequest(path: string, config: RequestConfig): ChatCompletionStream {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config.options?.timeoutMs ?? this.timeoutMs);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      config.options?.timeoutMs ?? this.timeoutMs,
+    );
     const url = buildUrl(this.baseUrl, path, config.query);
 
     try {

@@ -94,21 +94,21 @@ export class InMemoryCacheService implements CacheService {
     return buildCacheKey(input);
   }
 
-  async getExactCache(cacheKey: string): Promise<LLMResponseCacheEntry | undefined> {
+  getExactCache(cacheKey: string): Promise<LLMResponseCacheEntry | undefined> {
     const entry = this.items.get(cacheKey);
     if (!entry) {
-      return undefined;
+      return Promise.resolve(undefined);
     }
 
     if (entry.expiresAt.getTime() <= Date.now()) {
       this.items.delete(cacheKey);
-      return undefined;
+      return Promise.resolve(undefined);
     }
 
-    return entry;
+    return Promise.resolve(entry);
   }
 
-  async setExactCache(input: {
+  setExactCache(input: {
     readonly userId: string;
     readonly cacheKey: string;
     readonly normalizedPromptHash: string;
@@ -141,10 +141,10 @@ export class InMemoryCacheService implements CacheService {
     };
 
     this.items.set(input.cacheKey, entry);
-    return entry;
+    return Promise.resolve(entry);
   }
 
-  async recordCacheHit(cacheKey: string, estimatedCostSavedUsd: number): Promise<void> {
+  recordCacheHit(cacheKey: string, estimatedCostSavedUsd: number): Promise<void> {
     const entry = this.items.get(cacheKey);
     if (!entry) {
       return;
@@ -156,15 +156,17 @@ export class InMemoryCacheService implements CacheService {
       costSavedUsd: Number((entry.costSavedUsd + estimatedCostSavedUsd).toFixed(6)),
       updatedAt: new Date(),
     });
+
+    return Promise.resolve();
   }
 
-  async invalidateUserCache(userId?: string): Promise<number> {
+  invalidateUserCache(userId?: string): Promise<number> {
     const entries = [...this.items.values()].filter((entry) => !userId || entry.userId === userId);
     for (const entry of entries) {
       this.items.delete(entry.cacheKey);
     }
 
-    return entries.length;
+    return Promise.resolve(entries.length);
   }
 
   entries(userId?: string): Promise<readonly LLMResponseCacheEntry[]> {
@@ -330,7 +332,9 @@ function buildCacheKey(input: CacheKeyInput): {
   };
 }
 
-function normalizeMessages(messages: readonly { readonly role: string; readonly content: string }[]): string {
+function normalizeMessages(
+  messages: readonly { readonly role: string; readonly content: string }[],
+): string {
   return messages
     .map((message) => `${message.role}:${normalizePrompt(message.content)}`)
     .join("\n");

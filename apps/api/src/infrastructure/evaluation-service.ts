@@ -189,7 +189,9 @@ export class InMemoryEvaluationService implements EvaluationService {
   }
 
   listRuns(): Promise<readonly EvaluationRun[]> {
-    return Promise.resolve([...this.runs].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    return Promise.resolve(
+      [...this.runs].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+    );
   }
 
   getRun(runId: string): Promise<
@@ -286,7 +288,7 @@ export class InMemoryEvaluationService implements EvaluationService {
     }
   }
 
-  async scores(): Promise<readonly EvaluationScore[]> {
+  scores(): Promise<readonly EvaluationScore[]> {
     const completedRuns = this.runs.filter((run) => run.status === "completed");
     const grouped = new Map<string, EvaluationScore & { readonly totalScore: number }>();
 
@@ -314,7 +316,13 @@ export class InMemoryEvaluationService implements EvaluationService {
       });
     }
 
-    return [...grouped.values()].map(({ totalScore: _totalScore, ...score }) => score);
+    return Promise.resolve(
+      [...grouped.values()].map((scoreEntry) => {
+        const score = { ...scoreEntry };
+        delete score.totalScore;
+        return score;
+      }),
+    );
   }
 
   async routingScores(): Promise<readonly ModelEvaluationScore[]> {
@@ -342,7 +350,7 @@ export class InMemoryEvaluationService implements EvaluationService {
 }
 
 export class EchoEvaluationModelRunner implements EvaluationModelRunner {
-  async run(input: {
+  run(input: {
     readonly provider: string;
     readonly model: string;
     readonly messages: readonly ChatMessage[];
@@ -350,7 +358,7 @@ export class EchoEvaluationModelRunner implements EvaluationModelRunner {
     const content = input.messages.map((message) => message.content).join("\n");
     const tokenEstimate = estimateTokens(content.length);
 
-    return {
+    return Promise.resolve({
       id: `eval_${randomUUID()}`,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
@@ -370,7 +378,7 @@ export class EchoEvaluationModelRunner implements EvaluationModelRunner {
         completion_tokens: tokenEstimate.outputTokens,
         total_tokens: tokenEstimate.inputTokens + tokenEstimate.outputTokens,
       },
-    };
+    });
   }
 }
 

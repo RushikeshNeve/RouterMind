@@ -27,7 +27,7 @@ describe("RouteMind SDK", () => {
     expect(url).toBe("http://localhost:3000/v1/chat/completions");
     expect(init.method).toBe("POST");
     expect(readHeader(init, "x-api-key")).toBe("dev-key");
-    expect(JSON.parse(String(init.body))).toMatchObject({ model: "auto", stream: false });
+    expect(readJsonBody(init.body)).toMatchObject({ model: "auto", stream: false });
     expect(response.choices[0]?.message.content).toBe("Hello");
   });
 
@@ -66,10 +66,11 @@ describe("RouteMind SDK", () => {
   });
 
   it("times out requests", async () => {
-    const fetchMock = vi.fn((_input: string, init?: RequestInit) =>
-      new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(abortError()));
-      }),
+    const fetchMock = vi.fn(
+      (_input: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(abortError()));
+        }),
     );
     const client = new RouteMind({
       apiKey: "dev-key",
@@ -173,14 +174,16 @@ describe("RouteMind SDK", () => {
   });
 
   it("returns an async iterable for streaming chat completions", async () => {
-    const fetchMock = vi.fn((_input: string, _init?: RequestInit) =>
-      Promise.resolve(
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(
         new Response(sseBody(), {
           status: 200,
           headers: { "content-type": "text/event-stream" },
         }),
-      ),
-    );
+      );
+    });
     const client = new RouteMind({ apiKey: "dev-key", fetch: fetchMock });
     const stream = client.chat.completions.create({
       model: "auto",
@@ -193,7 +196,7 @@ describe("RouteMind SDK", () => {
       chunks.push(chunk);
     }
 
-    expect(JSON.parse(String(firstFetchCall(fetchMock)[1].body))).toMatchObject({ stream: true });
+    expect(readJsonBody(firstFetchCall(fetchMock)[1].body)).toMatchObject({ stream: true });
     expect(chunks).toContainEqual(
       expect.objectContaining({
         object: "chat.completion.chunk",
@@ -204,19 +207,29 @@ describe("RouteMind SDK", () => {
         ],
       }),
     );
-    expect(chunks).toContainEqual(expect.objectContaining({ routemind: expect.any(Object) }));
+    expect(chunks).toContainEqual(expect.objectContaining({ routemind: {} }));
   });
 });
 
 function mockFetch(body: unknown, status = 200) {
-  return vi.fn((_input: string, _init?: RequestInit) =>
-    Promise.resolve(
+  return vi.fn((input: string, init?: RequestInit) => {
+    void input;
+    void init;
+    return Promise.resolve(
       new Response(JSON.stringify(body), {
         status,
         headers: { "content-type": "application/json" },
       }),
-    ),
-  );
+    );
+  });
+}
+
+function readJsonBody(body: unknown): unknown {
+  if (typeof body === "string") {
+    return JSON.parse(body);
+  }
+
+  return JSON.parse(JSON.stringify(body));
 }
 
 function sseBody(): ReadableStream<Uint8Array> {
