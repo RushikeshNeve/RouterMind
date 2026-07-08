@@ -17,6 +17,7 @@ export interface RequestLogEntry {
   readonly providerSuccessRateAtRouting?: number;
   readonly routingMode?: string;
   readonly routingStrategy?: string;
+  readonly createdAt?: Date;
 }
 
 export interface RequestLogStore {
@@ -46,7 +47,8 @@ export class PrismaRequestLogStore implements RequestLogStore {
         "providerAvgLatencyAtRouting",
         "providerSuccessRateAtRouting",
         "routingMode",
-        "routingStrategy"
+        "routingStrategy",
+        "createdAt"
       )
       VALUES (
         ${id},
@@ -64,7 +66,8 @@ export class PrismaRequestLogStore implements RequestLogStore {
         ${entry.providerAvgLatencyAtRouting ?? null},
         ${entry.providerSuccessRateAtRouting ?? null},
         ${entry.routingMode ?? null},
-        ${entry.routingStrategy ?? null}
+        ${entry.routingStrategy ?? null},
+        ${entry.createdAt ?? new Date()}
       )
     `;
 
@@ -73,11 +76,15 @@ export class PrismaRequestLogStore implements RequestLogStore {
 }
 
 export class InMemoryRequestLogStore implements RequestLogStore {
-  readonly entries: RequestLogEntry[] = [];
+  readonly entries: Array<RequestLogEntry & { readonly id: string; readonly createdAt: Date }> = [];
 
   create(entry: RequestLogEntry): Promise<string> {
     const id = `request_log_${this.entries.length + 1}`;
-    this.entries.push(entry);
+    this.entries.push({
+      ...entry,
+      id,
+      createdAt: entry.createdAt ?? new Date(),
+    });
     return Promise.resolve(id);
   }
 }

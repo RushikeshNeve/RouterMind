@@ -33,7 +33,68 @@ model RequestLog {
   routingMode                 String?
   routingStrategy             String?
   createdAt                   DateTime @default(now())
-  routerDecisions RouterDecisionLog[]
+  routerDecisions  RouterDecisionLog[]
+  providerAttempts ProviderAttemptLog[]
+  executionPlans   ExecutionPlanLog[]
+}
+
+model CircuitBreakerState {
+  id            String   @id @default(cuid())
+  provider      String
+  model         String
+  state         String   @default("CLOSED")
+  failureCount  Int      @default(0)
+  openedAt      DateTime?
+  halfOpenAt    DateTime?
+  lastFailureAt DateTime?
+  lastSuccessAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([provider, model])
+  @@index([provider])
+  @@index([model])
+}
+
+model ProviderAttemptLog {
+  id           String   @id @default(cuid())
+  requestLogId String?
+  userId       String
+  provider     String
+  model        String
+  attemptNumber Int
+  status       String
+  latencyMs    Int
+  errorType    String?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  requestLog   RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+
+  @@index([requestLogId])
+  @@index([userId])
+  @@index([provider])
+  @@index([model])
+  @@index([createdAt])
+}
+
+model ExecutionPlanLog {
+  id               String      @id @default(cuid())
+  requestLogId     String?
+  userId           String
+  planType         String
+  stepsJson        Json
+  estimatedCostUsd Float
+  actualCostUsd    Float?
+  confidence       Float
+  reason           String
+  executed         Boolean
+  createdAt        DateTime    @default(now())
+  requestLog       RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+
+  @@index([requestLogId])
+  @@index([userId])
+  @@index([planType])
+  @@index([createdAt])
 }
 
 model ProviderHealthMetric {
@@ -89,6 +150,8 @@ model User {
   apiKeys             ApiKey[]
   providerCredentials ProviderCredential[]
   modelAccess         UserModelAccess[]
+  budgets             UserBudget[]
+  quotas                UsageQuota[]
 }
 
 model ApiKey {
@@ -127,4 +190,129 @@ model UserModelAccess {
 
   @@unique([userId, provider, model])
   @@index([userId])
+}
+
+model UserBudget {
+  id              String   @id @default(cuid())
+  userId          String
+  period          String
+  maxSpendUsd     Float
+  currentSpendUsd Float    @default(0)
+  resetAt         DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model UsageQuota {
+  id              String   @id @default(cuid())
+  userId          String
+  period          String
+  maxRequests     Int
+  currentRequests Int      @default(0)
+  maxTokens       Int
+  currentTokens   Int      @default(0)
+  resetAt         DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model EvaluationDataset {
+  id          String           @id @default(cuid())
+  name        String
+  description String?
+  taskType    String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  cases       EvaluationCase[]
+  runs        EvaluationRun[]
+
+  @@index([taskType])
+  @@index([createdAt])
+}
+
+model EvaluationCase {
+  id                String            @id @default(cuid())
+  datasetId         String
+  inputMessagesJson Json
+  expectedOutput    String
+  gradingRubric     String
+  metadataJson      Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  dataset           EvaluationDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  results           EvaluationResult[]
+
+  @@index([datasetId])
+  @@index([createdAt])
+}
+
+model EvaluationRun {
+  id           String             @id @default(cuid())
+  datasetId    String
+  model        String
+  provider     String
+  status       String             @default("pending")
+  totalCases   Int                @default(0)
+  passedCases  Int                @default(0)
+  averageScore Float              @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime           @default(now())
+  dataset      EvaluationDataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  results      EvaluationResult[]
+
+  @@index([datasetId])
+  @@index([provider])
+  @@index([model])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model EvaluationResult {
+  id          String        @id @default(cuid())
+  runId       String
+  caseId      String
+  modelOutput String
+  score       Float
+  passed      Boolean
+  judgeReason String
+  latencyMs   Int
+  costUsd     Float
+  createdAt   DateTime      @default(now())
+  run         EvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  case        EvaluationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([caseId])
+  @@index([createdAt])
+}
+
+model LLMResponseCache {
+  id                   String   @id @default(cuid())
+  userId               String
+  cacheKey             String   @unique
+  normalizedPromptHash String
+  promptText           String
+  responseJson         Json
+  model                String
+  provider             String
+  inputTokens          Int
+  outputTokens         Int
+  costSavedUsd         Float    @default(0)
+  hitCount             Int      @default(0)
+  expiresAt            DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([userId])
+  @@index([normalizedPromptHash])
+  @@index([expiresAt])
 }

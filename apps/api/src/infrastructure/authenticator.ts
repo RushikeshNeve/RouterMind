@@ -14,7 +14,10 @@ export interface ApiKeyAuthenticator {
 }
 
 export class PrismaApiKeyAuthenticator implements ApiKeyAuthenticator {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly fallbackApiKey?: string,
+  ) {}
 
   async authenticate(apiKey: string): Promise<AuthenticatedUser | undefined> {
     const record = await this.prisma.apiKey.findFirst({
@@ -27,16 +30,25 @@ export class PrismaApiKeyAuthenticator implements ApiKeyAuthenticator {
       },
     });
 
-    if (!record) {
-      return undefined;
+    if (record) {
+      return {
+        id: record.user.id,
+        name: record.user.name,
+        email: record.user.email,
+        apiKey,
+      };
     }
 
-    return {
-      id: record.user.id,
-      name: record.user.name,
-      email: record.user.email,
-      apiKey,
-    };
+    if (this.fallbackApiKey && apiKey === this.fallbackApiKey) {
+      return {
+        id: "dev-user",
+        name: "Development User",
+        email: "dev@routemind.local",
+        apiKey,
+      };
+    }
+
+    return undefined;
   }
 }
 

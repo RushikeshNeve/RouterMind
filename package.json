@@ -14,7 +14,7 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run build -w @routemind/dashboard",
     "clean": "npm run clean --workspaces --if-present",
     "db:migrate": "npm run db:migrate -w @routemind/api",
     "dev": "npm run dev -w @routemind/api",

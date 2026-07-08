@@ -14,6 +14,7 @@ export interface RouterDecisionLogEntry {
   readonly confidence?: number | undefined;
   readonly reason?: string | undefined;
   readonly fallbackUsed: boolean;
+  readonly createdAt?: Date;
 }
 
 export interface RouterDecisionLogStore {
@@ -38,7 +39,8 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
         "selectedProvider",
         "confidence",
         "reason",
-        "fallbackUsed"
+        "fallbackUsed",
+        "createdAt"
       )
       VALUES (
         ${randomUUID()},
@@ -53,17 +55,24 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
         ${entry.selectedProvider ?? null},
         ${entry.confidence ?? null},
         ${entry.reason ?? null},
-        ${entry.fallbackUsed}
+        ${entry.fallbackUsed},
+        ${entry.createdAt ?? new Date()}
       )
     `;
   }
 }
 
 export class InMemoryRouterDecisionLogStore implements RouterDecisionLogStore {
-  readonly entries: RouterDecisionLogEntry[] = [];
+  readonly entries: Array<
+    RouterDecisionLogEntry & { readonly id: string; readonly createdAt: Date }
+  > = [];
 
   create(entry: RouterDecisionLogEntry): Promise<void> {
-    this.entries.push(entry);
+    this.entries.push({
+      ...entry,
+      id: randomUUID(),
+      createdAt: entry.createdAt ?? new Date(),
+    });
     return Promise.resolve();
   }
 }

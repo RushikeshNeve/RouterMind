@@ -33,6 +33,11 @@ export interface ProviderAdapter {
   readonly providerName: string;
   readonly supportedModels: readonly string[];
   chatCompletion(request: ChatCompletionRequest): Promise<ProviderResponse>;
+  streamChatCompletion?(request: ChatCompletionRequest): AsyncIterable<ProviderStreamChunk>;
+}
+
+export interface ProviderStreamChunk {
+  readonly content: string;
 }
 
 export interface ProviderFactoryOptions {
@@ -78,6 +83,15 @@ abstract class MockProviderAdapter implements ProviderAdapter {
         total_tokens: request.estimatedUsage.inputTokens + request.estimatedUsage.outputTokens,
       },
     });
+  }
+
+  async *streamChatCompletion(request: ChatCompletionRequest): AsyncIterable<ProviderStreamChunk> {
+    const response = await this.chatCompletion(request);
+    const content = response.choices[0]?.message.content ?? "";
+
+    for (const chunk of splitContent(content)) {
+      yield { content: chunk };
+    }
   }
 }
 
@@ -135,6 +149,15 @@ abstract class BaseLiveProvider implements ProviderAdapter {
 
   abstract readonly supportedModels: readonly string[];
   abstract chatCompletion(request: ChatCompletionRequest): Promise<ProviderResponse>;
+
+  async *streamChatCompletion(request: ChatCompletionRequest): AsyncIterable<ProviderStreamChunk> {
+    const response = await this.chatCompletion({ ...request, stream: false });
+    const content = response.choices[0]?.message.content ?? "";
+
+    for (const chunk of splitContent(content)) {
+      yield { content: chunk };
+    }
+  }
 
   protected assertApiKey(): asserts this is this & { readonly apiKey: string } {
     if (!this.apiKey) {
@@ -685,6 +708,11 @@ function normalizeFinishReason(value: unknown): "stop" | "length" | "content_fil
   }
 
   return "stop";
+}
+
+function splitContent(content: string): readonly string[] {
+  const chunks = content.match(/.{1,12}(\s|$)|.{1,12}/g);
+  return chunks?.filter((chunk) => chunk.length > 0) ?? [];
 }
 
 export { ProviderError, isProviderError } from "./errors.js";
