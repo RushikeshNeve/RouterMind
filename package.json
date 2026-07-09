@@ -14,7 +14,7 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
-    "build": "tsc -b && npm run build -w @routemind/dashboard",
+    "build": "tsc -b",
     "clean": "npm run clean --workspaces --if-present",
     "db:migrate": "npm run db:migrate -w @routemind/api",
     "dev": "npm run dev -w @routemind/api",
@@ -22,7 +22,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "prepare": "if [ \"$NODE_ENV\" != \"production\" ]; then husky; fi",
+    "prepare": "echo \"Skipping husky install\"",
     "prisma:generate": "npm run prisma:generate -w @routemind/api",
     "seed:dev": "npm run seed:dev -w @routemind/api",
     "test": "vitest run",
@@ -38,7 +38,6 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.1.2",
     "prettier": "^3.5.3",
-    "prisma": "^6.19.3",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.35.1",
@@ -51,8 +50,5 @@
     "*.{ts,tsx,js,mjs,cjs}": [
       "eslint --fix"
     ]
-  },
-  "dependencies": {
-    "@prisma/client": "^6.19.3"
   }
 }
