@@ -22,7 +22,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "prepare": "husky",
+    "prepare": "if [ \"$NODE_ENV\" != \"production\" ]; then husky; fi",
     "prisma:generate": "npm run prisma:generate -w @routemind/api",
     "seed:dev": "npm run seed:dev -w @routemind/api",
     "test": "vitest run",
