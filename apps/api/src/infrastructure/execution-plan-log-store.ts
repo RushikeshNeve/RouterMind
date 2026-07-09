@@ -4,6 +4,7 @@ import type { ExecutionPlanStep, ExecutionPlanType } from "./ai-planner-service.
 
 export interface ExecutionPlanLogEntry {
   readonly requestLogId?: string;
+  readonly workspaceId?: string;
   readonly userId: string;
   readonly planType: ExecutionPlanType;
   readonly stepsJson: readonly ExecutionPlanStep[];
@@ -36,6 +37,7 @@ export class PrismaExecutionPlanLogStore implements ExecutionPlanLogStore {
       INSERT INTO "ExecutionPlanLog" (
         "id",
         "requestLogId",
+        "workspaceId",
         "userId",
         "planType",
         "stepsJson",
@@ -49,6 +51,7 @@ export class PrismaExecutionPlanLogStore implements ExecutionPlanLogStore {
       VALUES (
         ${randomUUID()},
         ${entry.requestLogId ?? null},
+        ${entry.workspaceId ?? null},
         ${entry.userId},
         ${entry.planType},
         ${JSON.stringify(entry.stepsJson)}::jsonb,

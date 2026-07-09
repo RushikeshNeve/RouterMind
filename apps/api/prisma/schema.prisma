@@ -17,6 +17,7 @@ model GatewayMetadata {
 
 model RequestLog {
   id                          String   @id @default(cuid())
+  workspaceId                 String?
   apiKey                      String
   requestedModel              String
   selectedModel               String?
@@ -36,6 +37,9 @@ model RequestLog {
   routerDecisions  RouterDecisionLog[]
   providerAttempts ProviderAttemptLog[]
   executionPlans   ExecutionPlanLog[]
+  firewallEvents   FirewallEvent[]
+
+  @@index([workspaceId])
 }
 
 model CircuitBreakerState {
@@ -59,6 +63,7 @@ model CircuitBreakerState {
 model ProviderAttemptLog {
   id           String   @id @default(cuid())
   requestLogId String?
+  workspaceId  String?
   userId       String
   provider     String
   model        String
@@ -72,6 +77,7 @@ model ProviderAttemptLog {
 
   @@index([requestLogId])
   @@index([userId])
+  @@index([workspaceId])
   @@index([provider])
   @@index([model])
   @@index([createdAt])
@@ -80,6 +86,7 @@ model ProviderAttemptLog {
 model ExecutionPlanLog {
   id               String      @id @default(cuid())
   requestLogId     String?
+  workspaceId      String?
   userId           String
   planType         String
   stepsJson        Json
@@ -93,6 +100,7 @@ model ExecutionPlanLog {
 
   @@index([requestLogId])
   @@index([userId])
+  @@index([workspaceId])
   @@index([planType])
   @@index([createdAt])
 }
@@ -124,6 +132,7 @@ model ProviderHealthMetric {
 model RouterDecisionLog {
   id                  String   @id @default(cuid())
   requestLogId        String?
+  workspaceId         String?
   userId              String
   mode                String
   routerModelUsed     String?
@@ -140,6 +149,7 @@ model RouterDecisionLog {
 
   @@index([requestLogId])
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model User {
@@ -152,23 +162,27 @@ model User {
   modelAccess         UserModelAccess[]
   budgets             UserBudget[]
   quotas                UsageQuota[]
+  workspaceMembers      WorkspaceMember[]
 }
 
 model ApiKey {
   id        String   @id @default(cuid())
   keyHash   String   @unique
   userId    String
+  workspaceId String?
   name      String
   createdAt DateTime @default(now())
   isActive  Boolean  @default(true)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model ProviderCredential {
   id              String   @id @default(cuid())
   userId          String
+  workspaceId     String?
   provider        String
   encryptedApiKey String
   isEnabled       Boolean  @default(true)
@@ -178,11 +192,13 @@ model ProviderCredential {
 
   @@unique([userId, provider])
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model UserModelAccess {
   id        String  @id @default(cuid())
   userId    String
+  workspaceId String?
   provider  String
   model     String
   isEnabled Boolean @default(true)
@@ -190,11 +206,13 @@ model UserModelAccess {
 
   @@unique([userId, provider, model])
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model UserBudget {
   id              String   @id @default(cuid())
   userId          String
+  workspaceId     String?
   period          String
   maxSpendUsd     Float
   currentSpendUsd Float    @default(0)
@@ -205,11 +223,13 @@ model UserBudget {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model UsageQuota {
   id              String   @id @default(cuid())
   userId          String
+  workspaceId     String?
   period          String
   maxRequests     Int
   currentRequests Int      @default(0)
@@ -222,6 +242,7 @@ model UsageQuota {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model EvaluationDataset {
@@ -298,6 +319,7 @@ model EvaluationResult {
 model LLMResponseCache {
   id                   String   @id @default(cuid())
   userId               String
+  workspaceId          String?
   cacheKey             String   @unique
   normalizedPromptHash String
   promptText           String
@@ -313,6 +335,72 @@ model LLMResponseCache {
   updatedAt            DateTime @updatedAt
 
   @@index([userId])
+  @@index([workspaceId])
   @@index([normalizedPromptHash])
   @@index([expiresAt])
+}
+
+model PolicyRule {
+  id        String   @id @default(cuid())
+  userId    String?
+  name      String
+  type      String
+  pattern   String?
+  action    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([isActive])
+}
+
+model FirewallEvent {
+  id           String      @id @default(cuid())
+  userId       String
+  workspaceId  String?
+  requestLogId String?
+  ruleId       String?
+  type         String
+  action       String
+  severity     String
+  matchedText  String?
+  message      String
+  createdAt    DateTime    @default(now())
+  requestLog   RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([requestLogId])
+  @@index([ruleId])
+  @@index([type])
+  @@index([action])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+model Workspace {
+  id        String            @id @default(cuid())
+  name      String
+  slug      String            @unique
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  members   WorkspaceMember[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([role])
 }

@@ -96,6 +96,9 @@ export function AppShell({
                 {isDemo ? "Demo data" : "Live API"}
               </span>
               <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                Workspace: Default
+              </span>
+              <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                 API {apiBaseUrl}
               </span>
               <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">

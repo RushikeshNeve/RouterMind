@@ -15,6 +15,7 @@ export class CostGuardrailService {
 
   async checkBeforeRequest(input: {
     userId: string;
+    workspaceId?: string;
     estimatedCostUsd: number;
     estimatedTokens: number;
     maxEstimatedCostUsd?: number;
@@ -32,7 +33,7 @@ export class CostGuardrailService {
 
     const budget = await this.prisma.userBudget.findFirst({
       where: {
-        userId: input.userId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : { userId: input.userId }),
         isActive: true,
         resetAt: { gt: new Date() },
       },
@@ -55,7 +56,7 @@ export class CostGuardrailService {
 
     const quota = await this.prisma.usageQuota.findFirst({
       where: {
-        userId: input.userId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : { userId: input.userId }),
         isActive: true,
         resetAt: { gt: new Date() },
       },
@@ -92,12 +93,13 @@ export class CostGuardrailService {
 
   async recordUsage(input: {
     userId: string;
+    workspaceId?: string;
     actualCostUsd: number;
     totalTokens: number;
   }): Promise<void> {
     await this.prisma.userBudget.updateMany({
       where: {
-        userId: input.userId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : { userId: input.userId }),
         isActive: true,
         resetAt: { gt: new Date() },
       },
@@ -110,7 +112,7 @@ export class CostGuardrailService {
 
     await this.prisma.usageQuota.updateMany({
       where: {
-        userId: input.userId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : { userId: input.userId }),
         isActive: true,
         resetAt: { gt: new Date() },
       },

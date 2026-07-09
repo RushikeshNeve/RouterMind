@@ -1,5 +1,6 @@
 import { estimateCost, estimateTokens } from "@routemind/cost-engine";
 import type { ProviderResponse } from "@routemind/core";
+import type { Tracer } from "@routemind/observability";
 import { type ProviderAdapter, isProviderError } from "@routemind/providers";
 import {
   type RouterLLMService,
@@ -30,6 +31,10 @@ import type {
   ProviderAttemptLogEntry,
   ProviderAttemptLogStore,
 } from "../infrastructure/provider-attempt-log-store.js";
+import type {
+  FirewallInspectionResult,
+  PromptFirewallService,
+} from "../infrastructure/prompt-firewall-service.js";
 import {
   ProviderErrorClassifier,
   type ProviderErrorType,
@@ -48,6 +53,7 @@ import type {
   UserAvailabilityStore,
   UserProviderAvailability,
 } from "../infrastructure/user-availability.js";
+import { maskApiKey } from "../security/api-key.js";
 
 const chatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
@@ -120,18 +126,22 @@ export interface ChatCompletionDependencies {
   readonly executionPlanLogStore: ExecutionPlanLogStore;
   readonly evaluationService: EvaluationService;
   readonly cacheService: CacheService;
+  readonly promptFirewallService: PromptFirewallService;
+  readonly tracer: Tracer;
   readonly retryPolicyService: RetryPolicyService;
   readonly providerFallbackService: ProviderFallbackService;
   readonly aiPlannerService: AIPlannerService;
   readonly costGuardrailService: {
     checkBeforeRequest(input: {
       userId: string;
+      workspaceId?: string;
       estimatedCostUsd: number;
       estimatedTokens: number;
       maxEstimatedCostUsd?: number;
     }): Promise<CostGuardrailCheck>;
     recordUsage(input: {
       userId: string;
+      workspaceId?: string;
       actualCostUsd: number;
       totalTokens: number;
     }): Promise<void>;
@@ -167,6 +177,7 @@ interface LogFailureOptions {
   readonly request: FastifyRequest;
   readonly requestStartedAt: number;
   readonly apiKey: string;
+  readonly workspaceId?: string;
   readonly requestedModel: string;
   readonly message: string;
   readonly selectedModel?: string;
@@ -278,6 +289,47 @@ export function registerChatCompletionRoutes(
         );
       }
 
+      const firewall = await dependencies.promptFirewallService.inspectRequest({
+        userId: user.id,
+        messages: parsed.data.messages,
+      });
+      const firewallMetadata = buildFirewallMetadata(firewall);
+
+      if (!firewall.allowed) {
+        const requestLogId = await logFailure(
+          {
+            request,
+            requestStartedAt,
+            apiKey,
+            workspaceId: user.workspaceId,
+            requestedModel: parsed.data.model,
+            message: "Prompt blocked by RouteMind firewall policy.",
+            routingMode: parsed.data.routing.mode,
+            routingStrategy: parsed.data.routing.strategy,
+          },
+          dependencies.requestLogStore,
+        );
+        await dependencies.promptFirewallService.recordEvents({
+          userId: user.id,
+          workspaceId: user.workspaceId,
+          requestLogId,
+          events: firewall.events,
+        });
+
+        return reply.status(400).send({
+          ...openAiError({
+            message: "Prompt blocked by RouteMind firewall policy.",
+            type: "invalid_request_error",
+            code: "prompt_firewall_blocked",
+          }),
+          firewall: firewallMetadata,
+          routemind: {
+            firewall: firewallMetadata,
+          },
+        });
+      }
+
+      const effectiveMessages = firewall.sanitizedMessages;
       const cachePlan = buildCachePlan(
         parsed.data.cache,
         parsed.data.stream,
@@ -287,7 +339,8 @@ export function registerChatCompletionRoutes(
         cachePlan.lookupMode === "exact"
           ? dependencies.cacheService.buildCacheKey({
               userId: user.id,
-              messages: parsed.data.messages,
+              workspaceId: user.workspaceId,
+              messages: effectiveMessages,
               requestedModel: parsed.data.model,
               routingStrategy: parsed.data.routing.strategy,
               temperature: parsed.data.temperature,
@@ -303,8 +356,9 @@ export function registerChatCompletionRoutes(
             outputTokens: cached.outputTokens,
           });
           await dependencies.cacheService.recordCacheHit(cached.cacheKey, costSavedUsd);
-          await dependencies.requestLogStore.create({
+          const requestLogId = await dependencies.requestLogStore.create({
             apiKey,
+            workspaceId: user.workspaceId,
             requestedModel: parsed.data.model,
             selectedModel: cached.model,
             provider: cached.provider,
@@ -317,7 +371,7 @@ export function registerChatCompletionRoutes(
             routingStrategy: parsed.data.routing.strategy,
           });
 
-          return reply.send(
+          const cachedResponse = attachFirewallMetadata(
             attachCacheMetadata(cached.responseJson, {
               hit: true,
               mode: cachePlan.requestedMode,
@@ -326,14 +380,22 @@ export function registerChatCompletionRoutes(
               originalProvider: cached.provider,
               semanticFallback: cachePlan.semanticFallback,
             }),
+            firewallMetadata,
           );
+          await dependencies.promptFirewallService.recordEvents({
+            userId: user.id,
+            workspaceId: user.workspaceId,
+            requestLogId,
+            events: firewall.events,
+          });
+          return reply.send(cachedResponse);
         }
       }
 
       const availability = await dependencies.availabilityStore.getAvailability(user);
       const providers =
         dependencies.providers ?? dependencies.providerFactory(availability.providerApiKeys);
-      const promptCharacters = parsed.data.messages.reduce(
+      const promptCharacters = effectiveMessages.reduce(
         (total, message) => total + message.content.length,
         0,
       );
@@ -341,7 +403,7 @@ export function registerChatCompletionRoutes(
       const liveMetrics = toRoutingMetrics(await dependencies.providerHealthService.list());
       const route = await decideLLMRoute({
         requestedModel: parsed.data.model,
-        messages: parsed.data.messages,
+        messages: effectiveMessages,
         availableModels: availability.enabledModels,
         enabledProviders: availability.enabledProviders,
         providerApiKeys: availability.providerApiKeys,
@@ -390,8 +452,8 @@ export function registerChatCompletionRoutes(
 
       const plannerDecision = await dependencies.aiPlannerService.plan({
         requestedExecutionPlan: parsed.data.routing.executionPlan,
-        userPrompt: parsed.data.messages.map((message) => message.content).join("\n"),
-        messages: parsed.data.messages,
+        userPrompt: effectiveMessages.map((message) => message.content).join("\n"),
+        messages: effectiveMessages,
         candidates: route.candidates,
         primaryProvider: route.provider,
         primaryModel: route.selectedModel,
@@ -439,6 +501,7 @@ export function registerChatCompletionRoutes(
         );
         await dependencies.executionPlanLogStore.create({
           requestLogId,
+          workspaceId: user.workspaceId,
           userId: user.id,
           planType: effectivePlannerDecision.executionPlan,
           stepsJson: effectivePlannerDecision.steps,
@@ -485,6 +548,7 @@ export function registerChatCompletionRoutes(
         const estimatedCostUsd = estimateCost(candidate.model, tokenEstimate);
         const guardrailCheck = await dependencies.costGuardrailService.checkBeforeRequest({
           userId: user.id,
+          workspaceId: user.workspaceId,
           estimatedCostUsd,
           estimatedTokens: tokenEstimate.inputTokens + tokenEstimate.outputTokens,
           maxEstimatedCostUsd: parsed.data.routing.maxEstimatedCostUsd,
@@ -519,6 +583,7 @@ export function registerChatCompletionRoutes(
             );
             await dependencies.executionPlanLogStore.create({
               requestLogId,
+              workspaceId: user.workspaceId,
               userId: user.id,
               planType: effectivePlannerDecision.executionPlan,
               stepsJson: effectivePlannerDecision.steps,
@@ -589,61 +654,75 @@ export function registerChatCompletionRoutes(
           continue;
         }
 
-        const result = await dependencies.retryPolicyService.execute(
-          () =>
-            provider.chatCompletion({
-              model: candidate.model,
-              messages: parsed.data.messages,
-              temperature: parsed.data.temperature,
-              stream: false,
-              estimatedUsage: tokenEstimate,
-            }),
+        const result = await dependencies.tracer.withSpan(
+          "chat.provider_attempt",
           {
-            onFailure: async ({ error, errorType, attemptNumber, latencyMs }) => {
-              const errorMessage = getProviderErrorMessage(error);
-              attempts.push({
-                provider: candidate.provider,
-                model: candidate.model,
-                attemptNumber,
-                status: "failed",
-                latencyMs,
-                errorType,
-                errorMessage,
-              });
-              await dependencies.providerHealthService.record({
-                provider: candidate.provider,
-                model: candidate.model,
-                latencyMs,
-                success: false,
-                errorCode: toHealthErrorCode(error, errorType),
-                errorMessage,
-                timestamp: new Date(),
-              });
-              await dependencies.circuitBreakerService.recordFailure(
-                candidate.provider,
-                candidate.model,
-              );
-            },
-            onSuccess: async ({ attemptNumber, latencyMs }) => {
-              attempts.push({
-                provider: candidate.provider,
-                model: candidate.model,
-                attemptNumber,
-                status: "success",
-                latencyMs,
-              });
-              await dependencies.providerHealthService.record({
-                provider: candidate.provider,
-                model: candidate.model,
-                latencyMs,
-                success: true,
-                timestamp: new Date(),
-              });
-              await dependencies.circuitBreakerService.recordSuccess(
-                candidate.provider,
-                candidate.model,
-              );
-            },
+            requestId: request.id,
+            userId: user.id,
+            workspaceId: user.workspaceId,
+            provider: candidate.provider,
+            model: candidate.model,
+          },
+          async (span) => {
+            const retryResult = await dependencies.retryPolicyService.execute(
+              () =>
+                provider.chatCompletion({
+                  model: candidate.model,
+                  messages: effectiveMessages,
+                  temperature: parsed.data.temperature,
+                  stream: false,
+                  estimatedUsage: tokenEstimate,
+                }),
+              {
+                onFailure: async ({ error, errorType, attemptNumber, latencyMs }) => {
+                  const errorMessage = getProviderErrorMessage(error);
+                  attempts.push({
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    attemptNumber,
+                    status: "failed",
+                    latencyMs,
+                    errorType,
+                    errorMessage,
+                  });
+                  await dependencies.providerHealthService.record({
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    latencyMs,
+                    success: false,
+                    errorCode: toHealthErrorCode(error, errorType),
+                    errorMessage,
+                    timestamp: new Date(),
+                  });
+                  await dependencies.circuitBreakerService.recordFailure(
+                    candidate.provider,
+                    candidate.model,
+                  );
+                },
+                onSuccess: async ({ attemptNumber, latencyMs }) => {
+                  attempts.push({
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    attemptNumber,
+                    status: "success",
+                    latencyMs,
+                  });
+                  await dependencies.providerHealthService.record({
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    latencyMs,
+                    success: true,
+                    timestamp: new Date(),
+                  });
+                  await dependencies.circuitBreakerService.recordSuccess(
+                    candidate.provider,
+                    candidate.model,
+                  );
+                },
+              },
+            );
+            span.setAttribute("status", retryResult.value ? "success" : "failed");
+            return retryResult;
           },
         );
 
@@ -667,9 +746,13 @@ export function registerChatCompletionRoutes(
 
         request.log.warn(
           {
+            requestId: request.id,
+            userId: user.id,
+            workspaceId: user.workspaceId,
             provider: candidate.provider,
-            selectedModel: candidate.model,
+            model: candidate.model,
             errorType: lastFailure?.errorType ?? classifier.classify(result.error),
+            status: "failed",
           },
           "provider candidate failed",
         );
@@ -678,6 +761,7 @@ export function registerChatCompletionRoutes(
       for (const attempt of attempts) {
         attemptLogEntries.push({
           userId: user.id,
+          workspaceId: user.workspaceId,
           provider: attempt.provider,
           model: attempt.model,
           attemptNumber: attempt.attemptNumber,
@@ -715,6 +799,7 @@ export function registerChatCompletionRoutes(
         );
         await dependencies.executionPlanLogStore.create({
           requestLogId,
+          workspaceId: user.workspaceId,
           userId: user.id,
           planType: effectivePlannerDecision.executionPlan,
           stepsJson: effectivePlannerDecision.steps,
@@ -757,12 +842,14 @@ export function registerChatCompletionRoutes(
       };
       await dependencies.costGuardrailService.recordUsage({
         userId: user.id,
+        workspaceId: user.workspaceId,
         actualCostUsd: finalActualCostUsd,
         totalTokens: actualUsage.inputTokens + actualUsage.outputTokens,
       });
 
       const requestLogId = await dependencies.requestLogStore.create({
         apiKey,
+        workspaceId: user.workspaceId,
         requestedModel: parsed.data.model,
         selectedModel: finalModel,
         provider: finalProvider,
@@ -778,6 +865,12 @@ export function registerChatCompletionRoutes(
         routingMode: route.routingMetadata.mode,
         routingStrategy: route.routingMetadata.routingStrategy,
       });
+      await dependencies.promptFirewallService.recordEvents({
+        userId: user.id,
+        workspaceId: user.workspaceId,
+        requestLogId,
+        events: firewall.events,
+      });
       await persistAttemptLogs(
         dependencies.providerAttemptLogStore,
         attemptLogEntries,
@@ -785,6 +878,7 @@ export function registerChatCompletionRoutes(
       );
       await dependencies.executionPlanLogStore.create({
         requestLogId,
+        workspaceId: user.workspaceId,
         userId: user.id,
         planType: effectivePlannerDecision.executionPlan,
         stepsJson: effectivePlannerDecision.steps,
@@ -796,6 +890,7 @@ export function registerChatCompletionRoutes(
       });
       await dependencies.routerDecisionLogStore.create({
         requestLogId,
+        workspaceId: user.workspaceId,
         userId: user.id,
         mode: route.routingMetadata.mode,
         routerModelUsed: route.routingMetadata.routerModelUsed,
@@ -857,15 +952,18 @@ export function registerChatCompletionRoutes(
           costGuardrails,
           resilience,
           executionPlan,
+          firewall: firewallMetadata,
         },
         routingMetadata: route.routingMetadata,
         resilience,
         executionPlan,
+        firewall: firewallMetadata,
         routemind: {
           routing: route.routingMetadata,
           resilience,
           costGuardrails,
           executionPlan,
+          firewall: firewallMetadata,
         },
       };
 
@@ -885,6 +983,7 @@ export function registerChatCompletionRoutes(
       ) {
         await dependencies.cacheService.setExactCache({
           userId: user.id,
+          workspaceId: user.workspaceId,
           cacheKey: cacheKey.cacheKey,
           normalizedPromptHash: cacheKey.normalizedPromptHash,
           promptText: cacheKey.promptText,
@@ -899,9 +998,33 @@ export function registerChatCompletionRoutes(
       }
 
       if (parsed.data.stream) {
+        request.log.info(
+          {
+            requestId: request.id,
+            userId: user.id,
+            workspaceId: user.workspaceId,
+            provider: finalProvider,
+            model: finalModel,
+            latencyMs,
+            status: "success",
+          },
+          "chat completion stream prepared",
+        );
         return sendStreamingResponse(reply, responseBody);
       }
 
+      request.log.info(
+        {
+          requestId: request.id,
+          userId: user.id,
+          workspaceId: user.workspaceId,
+          provider: finalProvider,
+          model: finalModel,
+          latencyMs,
+          status: "success",
+        },
+        "chat completion request completed",
+      );
       return reply.send(responseWithCacheMetadata);
     },
   );
@@ -976,6 +1099,40 @@ function attachCacheMetadata(
   return response;
 }
 
+function attachFirewallMetadata(
+  responseJson: unknown,
+  firewall: ReturnType<typeof buildFirewallMetadata>,
+): Record<string, unknown> {
+  const response = cloneRecord(responseJson);
+  const metadata = isUnknownRecord(response.metadata) ? response.metadata : {};
+  const routemind = isUnknownRecord(response.routemind) ? response.routemind : {};
+
+  response.metadata = {
+    ...metadata,
+    firewall,
+  };
+  response.firewall = firewall;
+  response.routemind = {
+    ...routemind,
+    firewall,
+  };
+
+  return response;
+}
+
+function buildFirewallMetadata(result: FirewallInspectionResult) {
+  return {
+    inspected: true,
+    action: result.action,
+    events: result.events.map((event) => ({
+      type: event.type,
+      severity: event.severity,
+      action: event.action,
+      message: event.message,
+    })),
+  };
+}
+
 function cloneRecord(value: unknown): Record<string, unknown> {
   if (!isUnknownRecord(value)) {
     return {};
@@ -1012,6 +1169,7 @@ function sendStreamingResponse(
       readonly resilience: unknown;
       readonly costGuardrails: unknown;
       readonly executionPlan: unknown;
+      readonly firewall?: unknown;
     };
   },
 ) {
@@ -1108,6 +1266,7 @@ async function logFailure(
 ): Promise<string> {
   const requestLogId = await requestLogStore.create({
     apiKey: options.apiKey,
+    workspaceId: options.workspaceId,
     requestedModel: options.requestedModel,
     selectedModel: options.selectedModel,
     provider: options.provider,
@@ -1123,8 +1282,15 @@ async function logFailure(
 
   options.request.log.warn(
     {
-      apiKey: options.apiKey === "missing" ? "missing" : "provided",
+      requestId: options.request.id,
+      workspaceId: options.workspaceId,
+      apiKey: options.apiKey === "missing" ? "missing" : maskApiKey(options.apiKey),
       requestedModel: options.requestedModel,
+      provider: options.provider,
+      model: options.selectedModel,
+      latencyMs: Date.now() - options.requestStartedAt,
+      status: "failed",
+      errorCode: "request_failed",
       errorMessage: options.message,
     },
     "chat completion request failed",

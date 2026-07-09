@@ -12,6 +12,7 @@ export interface CacheRequestOptions {
 
 export interface CacheKeyInput {
   readonly userId: string;
+  readonly workspaceId?: string;
   readonly messages: readonly { readonly role: string; readonly content: string }[];
   readonly requestedModel: string;
   readonly routingStrategy: string;
@@ -21,6 +22,7 @@ export interface CacheKeyInput {
 export interface LLMResponseCacheEntry {
   readonly id: string;
   readonly userId: string;
+  readonly workspaceId?: string | null;
   readonly cacheKey: string;
   readonly normalizedPromptHash: string;
   readonly promptText: string;
@@ -70,6 +72,7 @@ export interface CacheService {
   getExactCache(cacheKey: string): Promise<LLMResponseCacheEntry | undefined>;
   setExactCache(input: {
     readonly userId: string;
+    readonly workspaceId?: string;
     readonly cacheKey: string;
     readonly normalizedPromptHash: string;
     readonly promptText: string;
@@ -110,6 +113,7 @@ export class InMemoryCacheService implements CacheService {
 
   setExactCache(input: {
     readonly userId: string;
+    readonly workspaceId?: string;
     readonly cacheKey: string;
     readonly normalizedPromptHash: string;
     readonly promptText: string;
@@ -125,6 +129,7 @@ export class InMemoryCacheService implements CacheService {
     const entry: LLMResponseCacheEntry = {
       id: this.items.get(input.cacheKey)?.id ?? `cache_${this.items.size + 1}`,
       userId: input.userId,
+      workspaceId: input.workspaceId ?? null,
       cacheKey: input.cacheKey,
       normalizedPromptHash: input.normalizedPromptHash,
       promptText: input.promptText,
@@ -147,7 +152,7 @@ export class InMemoryCacheService implements CacheService {
   recordCacheHit(cacheKey: string, estimatedCostSavedUsd: number): Promise<void> {
     const entry = this.items.get(cacheKey);
     if (!entry) {
-      return;
+      return Promise.resolve();
     }
 
     this.items.set(cacheKey, {
@@ -191,17 +196,26 @@ export class PrismaCacheService implements CacheService {
   }
 
   async getExactCache(cacheKey: string): Promise<LLMResponseCacheEntry | undefined> {
-    const [entry] = await this.prisma.$queryRaw<LLMResponseCacheEntry[]>`
-      SELECT * FROM "LLMResponseCache"
-      WHERE "cacheKey" = ${cacheKey} AND "expiresAt" > ${new Date()}
-      LIMIT 1
-    `;
+    try {
+      const [entry] = await this.prisma.$queryRaw<LLMResponseCacheEntry[]>`
+        SELECT * FROM "LLMResponseCache"
+        WHERE "cacheKey" = ${cacheKey} AND "expiresAt" > ${new Date()}
+        LIMIT 1
+      `;
 
-    return entry ? normalizeCacheRow(entry) : undefined;
+      return entry ? normalizeCacheRow(entry) : undefined;
+    } catch (error) {
+      if (isMissingCacheTableError(error)) {
+        return undefined;
+      }
+
+      throw error;
+    }
   }
 
   async setExactCache(input: {
     readonly userId: string;
+    readonly workspaceId?: string;
     readonly cacheKey: string;
     readonly normalizedPromptHash: string;
     readonly promptText: string;
@@ -216,44 +230,71 @@ export class PrismaCacheService implements CacheService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + input.ttlSeconds * 1000);
 
-    await this.prisma.$executeRaw`
-      INSERT INTO "LLMResponseCache" (
-        "id",
-        "userId",
-        "cacheKey",
-        "normalizedPromptHash",
-        "promptText",
-        "responseJson",
-        "model",
-        "provider",
-        "inputTokens",
-        "outputTokens",
-        "expiresAt",
-        "updatedAt"
-      )
-      VALUES (
-        ${randomUUID()},
-        ${input.userId},
-        ${input.cacheKey},
-        ${input.normalizedPromptHash},
-        ${input.promptText},
-        ${JSON.stringify(input.responseJson)}::jsonb,
-        ${input.model},
-        ${input.provider},
-        ${input.inputTokens},
-        ${input.outputTokens},
-        ${expiresAt},
-        ${now}
-      )
-      ON CONFLICT ("cacheKey") DO UPDATE SET
-        "responseJson" = EXCLUDED."responseJson",
-        "model" = EXCLUDED."model",
-        "provider" = EXCLUDED."provider",
-        "inputTokens" = EXCLUDED."inputTokens",
-        "outputTokens" = EXCLUDED."outputTokens",
-        "expiresAt" = EXCLUDED."expiresAt",
-        "updatedAt" = EXCLUDED."updatedAt"
-    `;
+    try {
+      await this.prisma.$executeRaw`
+        INSERT INTO "LLMResponseCache" (
+          "id",
+          "userId",
+          "workspaceId",
+          "cacheKey",
+          "normalizedPromptHash",
+          "promptText",
+          "responseJson",
+          "model",
+          "provider",
+          "inputTokens",
+          "outputTokens",
+          "expiresAt",
+          "updatedAt"
+        )
+        VALUES (
+          ${randomUUID()},
+          ${input.userId},
+          ${input.workspaceId ?? null},
+          ${input.cacheKey},
+          ${input.normalizedPromptHash},
+          ${input.promptText},
+          ${JSON.stringify(input.responseJson)}::jsonb,
+          ${input.model},
+          ${input.provider},
+          ${input.inputTokens},
+          ${input.outputTokens},
+          ${expiresAt},
+          ${now}
+        )
+        ON CONFLICT ("cacheKey") DO UPDATE SET
+          "responseJson" = EXCLUDED."responseJson",
+          "model" = EXCLUDED."model",
+          "provider" = EXCLUDED."provider",
+          "inputTokens" = EXCLUDED."inputTokens",
+          "outputTokens" = EXCLUDED."outputTokens",
+          "expiresAt" = EXCLUDED."expiresAt",
+          "updatedAt" = EXCLUDED."updatedAt"
+      `;
+    } catch (error) {
+      if (isMissingCacheTableError(error)) {
+        return {
+          id: "cache_unpersisted",
+          userId: input.userId,
+          workspaceId: input.workspaceId ?? null,
+          cacheKey: input.cacheKey,
+          normalizedPromptHash: input.normalizedPromptHash,
+          promptText: input.promptText,
+          responseJson: input.responseJson,
+          model: input.model,
+          provider: input.provider,
+          inputTokens: input.inputTokens,
+          outputTokens: input.outputTokens,
+          costSavedUsd: 0,
+          hitCount: 0,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        };
+      }
+
+      throw error;
+    }
 
     const entry = await this.getExactCache(input.cacheKey);
     if (!entry) {
@@ -264,41 +305,65 @@ export class PrismaCacheService implements CacheService {
   }
 
   async recordCacheHit(cacheKey: string, estimatedCostSavedUsd: number): Promise<void> {
-    await this.prisma.$executeRaw`
-      UPDATE "LLMResponseCache"
-      SET
-        "hitCount" = "hitCount" + 1,
-        "costSavedUsd" = "costSavedUsd" + ${estimatedCostSavedUsd},
-        "updatedAt" = ${new Date()}
-      WHERE "cacheKey" = ${cacheKey}
-    `;
+    try {
+      await this.prisma.$executeRaw`
+        UPDATE "LLMResponseCache"
+        SET
+          "hitCount" = "hitCount" + 1,
+          "costSavedUsd" = "costSavedUsd" + ${estimatedCostSavedUsd},
+          "updatedAt" = ${new Date()}
+        WHERE "cacheKey" = ${cacheKey}
+      `;
+    } catch (error) {
+      if (!isMissingCacheTableError(error)) {
+        throw error;
+      }
+    }
   }
 
   async invalidateUserCache(userId?: string): Promise<number> {
-    const result = userId
-      ? await this.prisma.$executeRaw`
-          DELETE FROM "LLMResponseCache"
-          WHERE "userId" = ${userId}
-        `
-      : await this.prisma.$executeRaw`
-          DELETE FROM "LLMResponseCache"
-        `;
+    let result: number;
+    try {
+      result = userId
+        ? await this.prisma.$executeRaw`
+            DELETE FROM "LLMResponseCache"
+            WHERE "userId" = ${userId}
+          `
+        : await this.prisma.$executeRaw`
+            DELETE FROM "LLMResponseCache"
+          `;
+    } catch (error) {
+      if (isMissingCacheTableError(error)) {
+        return 0;
+      }
+
+      throw error;
+    }
 
     return Number(result);
   }
 
   async entries(userId?: string): Promise<readonly LLMResponseCacheEntry[]> {
-    const rows = userId
-      ? await this.prisma.$queryRaw<LLMResponseCacheEntry[]>`
-          SELECT * FROM "LLMResponseCache"
-          WHERE "userId" = ${userId} AND "expiresAt" > ${new Date()}
-          ORDER BY "updatedAt" DESC
-        `
-      : await this.prisma.$queryRaw<LLMResponseCacheEntry[]>`
-          SELECT * FROM "LLMResponseCache"
-          WHERE "expiresAt" > ${new Date()}
-          ORDER BY "updatedAt" DESC
-        `;
+    let rows: LLMResponseCacheEntry[];
+    try {
+      rows = userId
+        ? await this.prisma.$queryRaw<LLMResponseCacheEntry[]>`
+            SELECT * FROM "LLMResponseCache"
+            WHERE "userId" = ${userId} AND "expiresAt" > ${new Date()}
+            ORDER BY "updatedAt" DESC
+          `
+        : await this.prisma.$queryRaw<LLMResponseCacheEntry[]>`
+            SELECT * FROM "LLMResponseCache"
+            WHERE "expiresAt" > ${new Date()}
+            ORDER BY "updatedAt" DESC
+          `;
+    } catch (error) {
+      if (isMissingCacheTableError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
 
     return rows.map(normalizeCacheRow);
   }
@@ -318,6 +383,7 @@ function buildCacheKey(input: CacheKeyInput): {
   const cacheKey = hash(
     JSON.stringify({
       userId: input.userId,
+      workspaceId: input.workspaceId,
       normalizedPromptHash,
       requestedModel: input.requestedModel,
       routingStrategy: input.routingStrategy,
@@ -398,4 +464,25 @@ function normalizeCacheRow(row: LLMResponseCacheEntry): LLMResponseCacheEntry {
     createdAt: new Date(row.createdAt),
     updatedAt: new Date(row.updatedAt),
   };
+}
+
+function isMissingCacheTableError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const record = error as {
+    readonly code?: unknown;
+    readonly meta?: { readonly code?: unknown; readonly message?: unknown };
+    readonly message?: unknown;
+  };
+  const message = `${stringValue(record.meta?.message)} ${stringValue(record.message)}`;
+
+  return (
+    record.code === "P2010" && record.meta?.code === "42P01" && /LLMResponseCache/.test(message)
+  );
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }

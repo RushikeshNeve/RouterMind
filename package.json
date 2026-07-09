@@ -38,6 +38,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.1.2",
     "prettier": "^3.5.3",
+    "prisma": "^6.19.3",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.35.1",
@@ -50,5 +51,8 @@
     "*.{ts,tsx,js,mjs,cjs}": [
       "eslint --fix"
     ]
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
   }
 }

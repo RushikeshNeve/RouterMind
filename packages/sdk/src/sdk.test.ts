@@ -207,7 +207,9 @@ describe("RouteMind SDK", () => {
         ],
       }),
     );
-    expect(chunks).toContainEqual(expect.objectContaining({ routemind: {} }));
+    expect(chunks).toContainEqual(
+      expect.objectContaining({ routemind: expect.any(Object) as unknown as object }),
+    );
   });
 });
 

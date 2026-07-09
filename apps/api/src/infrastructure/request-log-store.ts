@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export interface RequestLogEntry {
+  readonly workspaceId?: string;
   readonly apiKey: string;
   readonly requestedModel: string;
   readonly selectedModel?: string;
@@ -33,6 +34,7 @@ export class PrismaRequestLogStore implements RequestLogStore {
     await this.prisma.$executeRaw`
       INSERT INTO "RequestLog" (
         "id",
+        "workspaceId",
         "apiKey",
         "requestedModel",
         "selectedModel",
@@ -52,6 +54,7 @@ export class PrismaRequestLogStore implements RequestLogStore {
       )
       VALUES (
         ${id},
+        ${entry.workspaceId ?? null},
         ${entry.apiKey},
         ${entry.requestedModel},
         ${entry.selectedModel ?? null},

@@ -13,9 +13,11 @@ import type {
   RouterDecisionLogEntry,
 } from "./router-decision-log-store.js";
 import type { CacheStats } from "./cache-service.js";
+import type { FirewallStats } from "./prompt-firewall-service.js";
 
 export interface AnalyticsFilters {
   readonly userId?: string;
+  readonly workspaceId?: string;
   readonly from?: Date;
   readonly to?: Date;
 }
@@ -62,6 +64,16 @@ export interface AnalyticsSummary {
     readonly cacheMisses: number;
     readonly estimatedCostSavedUsd: number;
     readonly cacheHitRate: number;
+  };
+  readonly firewall: {
+    readonly totalEvents: number;
+    readonly blockedRequests: number;
+    readonly redactedRequests: number;
+    readonly warnings: number;
+    readonly topRuleTypes: readonly {
+      readonly type: string;
+      readonly count: number;
+    }[];
   };
   readonly topModelsByUsage: readonly ModelAnalyticsRow[];
   readonly topModelsBySpend: readonly ModelAnalyticsRow[];
@@ -112,6 +124,7 @@ export interface RecentRequestAnalyticsRow {
   readonly id: string;
   readonly timestamp: string;
   readonly requestedModel: string;
+  readonly workspaceId: string | null;
   readonly selectedModel?: string;
   readonly provider?: string;
   readonly status: "success" | "failed";
@@ -141,6 +154,9 @@ export class InMemoryAnalyticsService implements AnalyticsService {
     private readonly cacheStatsProvider?: {
       stats(userId?: string): Promise<CacheStats>;
     },
+    private readonly firewallStatsProvider?: {
+      stats(userId?: string): Promise<FirewallStats>;
+    },
   ) {}
 
   async summary(filters: AnalyticsFilters): Promise<AnalyticsSummary> {
@@ -154,6 +170,7 @@ export class InMemoryAnalyticsService implements AnalyticsService {
       modelRows,
       providerRows,
       await this.cacheStatsProvider?.stats(filters.userId),
+      await this.firewallStatsProvider?.stats(filters.userId),
     );
   }
 
@@ -211,6 +228,9 @@ export class InMemoryAnalyticsService implements AnalyticsService {
     );
     const requests = this.requestLogStore.entries
       .filter((entry) => dateInRange(entry.createdAt, filters))
+      .filter(
+        (entry) => filters.workspaceId === undefined || entry.workspaceId === filters.workspaceId,
+      )
       .filter((entry) => filters.userId === undefined || userRequestIds.has(entry.id))
       .map(toRequestRow);
     const requestIds = new Set(requests.map((entry) => entry.id));
@@ -242,6 +262,9 @@ export class PrismaAnalyticsService implements AnalyticsService {
     private readonly cacheStatsProvider?: {
       stats(userId?: string): Promise<CacheStats>;
     },
+    private readonly firewallStatsProvider?: {
+      stats(userId?: string): Promise<FirewallStats>;
+    },
   ) {}
 
   async summary(filters: AnalyticsFilters): Promise<AnalyticsSummary> {
@@ -255,6 +278,7 @@ export class PrismaAnalyticsService implements AnalyticsService {
       modelRows,
       providerRows,
       await this.cacheStatsProvider?.stats(filters.userId),
+      await this.firewallStatsProvider?.stats(filters.userId),
     );
   }
 
@@ -292,6 +316,7 @@ export class PrismaAnalyticsService implements AnalyticsService {
       FROM "RequestLog" r
       WHERE (${filters.from ?? null}::timestamp IS NULL OR r."createdAt" >= ${filters.from ?? null})
         AND (${filters.to ?? null}::timestamp IS NULL OR r."createdAt" <= ${filters.to ?? null})
+        AND (${filters.workspaceId ?? null}::text IS NULL OR r."workspaceId" = ${filters.workspaceId ?? null})
         AND (
           ${filters.userId ?? null}::text IS NULL
           OR EXISTS (
@@ -352,6 +377,7 @@ interface AnalyticsSnapshot {
 
 interface RequestRow {
   readonly id: string;
+  readonly workspaceId: string | null;
   readonly requestedModel: string;
   readonly selectedModel: string | null;
   readonly provider: string | null;
@@ -402,6 +428,7 @@ function buildSummary(
   modelRows: readonly ModelAnalyticsRow[],
   providerRows: readonly ProviderAnalyticsRow[],
   cacheStats?: CacheStats,
+  firewallStats?: FirewallStats,
 ): AnalyticsSummary {
   const total = data.requests.length;
   const success = data.requests.filter((request) => request.status === "success").length;
@@ -461,6 +488,13 @@ function buildSummary(
       cacheMisses,
       estimatedCostSavedUsd: cacheStats?.estimatedCostSavedUsd ?? 0,
       cacheHitRate: rate(cacheHits, cacheHits + cacheMisses),
+    },
+    firewall: {
+      totalEvents: firewallStats?.totalEvents ?? 0,
+      blockedRequests: firewallStats?.blockedRequests ?? 0,
+      redactedRequests: firewallStats?.redactedRequests ?? 0,
+      warnings: firewallStats?.warnings ?? 0,
+      topRuleTypes: firewallStats?.topRuleTypes ?? [],
     },
     topModelsByUsage: modelRows.slice(0, 5),
     topModelsBySpend: [...modelRows]
@@ -580,6 +614,7 @@ function recentRequests(
       id: request.id,
       timestamp: request.createdAt.toISOString(),
       requestedModel: request.requestedModel,
+      workspaceId: request.workspaceId,
       selectedModel: request.selectedModel ?? undefined,
       provider: request.provider ?? undefined,
       status: request.status,
@@ -610,6 +645,7 @@ function toRequestRow(
   return {
     id: entry.id,
     requestedModel: entry.requestedModel,
+    workspaceId: entry.workspaceId ?? null,
     selectedModel: entry.selectedModel ?? null,
     provider: entry.provider ?? null,
     inputTokens: entry.inputTokens ?? null,

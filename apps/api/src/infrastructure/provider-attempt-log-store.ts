@@ -4,6 +4,7 @@ import type { ProviderErrorType } from "./provider-error-classifier.js";
 
 export interface ProviderAttemptLogEntry {
   readonly requestLogId?: string;
+  readonly workspaceId?: string;
   readonly userId: string;
   readonly provider: string;
   readonly model: string;
@@ -19,6 +20,7 @@ export interface ProviderAttemptLogStore {
   create(entry: ProviderAttemptLogEntry): Promise<void>;
   list(filters?: {
     readonly userId?: string;
+    readonly workspaceId?: string;
     readonly provider?: string;
     readonly model?: string;
     readonly status?: "success" | "failed";
@@ -50,6 +52,7 @@ export class InMemoryProviderAttemptLogStore implements ProviderAttemptLogStore 
         .filter(
           (entry) =>
             (filters.userId === undefined || entry.userId === filters.userId) &&
+            (filters.workspaceId === undefined || entry.workspaceId === filters.workspaceId) &&
             (filters.provider === undefined || entry.provider === filters.provider) &&
             (filters.model === undefined || entry.model === filters.model) &&
             (filters.status === undefined || entry.status === filters.status),
@@ -68,6 +71,7 @@ export class PrismaProviderAttemptLogStore implements ProviderAttemptLogStore {
       INSERT INTO "ProviderAttemptLog" (
         "id",
         "requestLogId",
+        "workspaceId",
         "userId",
         "provider",
         "model",
@@ -81,6 +85,7 @@ export class PrismaProviderAttemptLogStore implements ProviderAttemptLogStore {
       VALUES (
         ${randomUUID()},
         ${entry.requestLogId ?? null},
+        ${entry.workspaceId ?? null},
         ${entry.userId},
         ${entry.provider},
         ${entry.model},
@@ -99,6 +104,7 @@ export class PrismaProviderAttemptLogStore implements ProviderAttemptLogStore {
     const rows = await this.prisma.$queryRaw<ProviderAttemptLogRow[]>`
       SELECT * FROM "ProviderAttemptLog"
       WHERE (${filters.userId ?? null}::text IS NULL OR "userId" = ${filters.userId ?? null})
+        AND (${filters.workspaceId ?? null}::text IS NULL OR "workspaceId" = ${filters.workspaceId ?? null})
         AND (${filters.provider ?? null}::text IS NULL OR "provider" = ${filters.provider ?? null})
         AND (${filters.model ?? null}::text IS NULL OR "model" = ${filters.model ?? null})
         AND (${filters.status ?? null}::text IS NULL OR "status" = ${filters.status ?? null})
@@ -109,6 +115,7 @@ export class PrismaProviderAttemptLogStore implements ProviderAttemptLogStore {
     return rows.map((row) => ({
       ...row,
       requestLogId: row.requestLogId ?? undefined,
+      workspaceId: row.workspaceId ?? undefined,
       errorType: row.errorType ?? undefined,
       errorMessage: row.errorMessage ?? undefined,
       createdAt: new Date(row.createdAt),
@@ -119,6 +126,7 @@ export class PrismaProviderAttemptLogStore implements ProviderAttemptLogStore {
 interface ProviderAttemptLogRow {
   readonly id: string;
   readonly requestLogId: string | null;
+  readonly workspaceId: string | null;
   readonly userId: string;
   readonly provider: string;
   readonly model: string;

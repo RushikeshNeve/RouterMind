@@ -4,6 +4,7 @@ import type { AnalyticsFilters, AnalyticsService } from "../infrastructure/analy
 
 const analyticsQuerySchema = z.object({
   userId: z.string().min(1).optional(),
+  workspaceId: z.string().min(1).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   limit: z.coerce.number().int().positive().max(200).optional(),
@@ -93,6 +94,7 @@ function parseFilters(
     success: true,
     data: {
       userId: parsed.data.userId,
+      workspaceId: parsed.data.workspaceId,
       from: parsed.data.from ? new Date(parsed.data.from) : undefined,
       to: parsed.data.to ? new Date(parsed.data.to) : undefined,
     },

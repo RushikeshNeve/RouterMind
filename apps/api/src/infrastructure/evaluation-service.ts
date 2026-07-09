@@ -318,8 +318,8 @@ export class InMemoryEvaluationService implements EvaluationService {
 
     return Promise.resolve(
       [...grouped.values()].map((scoreEntry) => {
-        const score = { ...scoreEntry };
-        delete score.totalScore;
+        const { totalScore, ...score } = scoreEntry;
+        void totalScore;
         return score;
       }),
     );

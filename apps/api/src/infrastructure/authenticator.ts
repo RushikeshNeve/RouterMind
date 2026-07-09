@@ -7,6 +7,8 @@ export interface AuthenticatedUser {
   readonly name: string;
   readonly email: string;
   readonly apiKey: string;
+  readonly workspaceId?: string;
+  readonly workspaceRole?: "owner" | "admin" | "developer" | "viewer";
 }
 
 export interface ApiKeyAuthenticator {
@@ -20,31 +22,47 @@ export class PrismaApiKeyAuthenticator implements ApiKeyAuthenticator {
   ) {}
 
   async authenticate(apiKey: string): Promise<AuthenticatedUser | undefined> {
-    const record = await this.prisma.apiKey.findFirst({
-      where: {
-        keyHash: hashApiKey(apiKey),
-        isActive: true,
-      },
-      include: {
-        user: true,
-      },
-    });
-
-    if (record) {
-      return {
-        id: record.user.id,
-        name: record.user.name,
-        email: record.user.email,
-        apiKey,
-      };
-    }
-
     if (this.fallbackApiKey && apiKey === this.fallbackApiKey) {
       return {
         id: "dev-user",
         name: "Development User",
         email: "dev@routemind.local",
         apiKey,
+      };
+    }
+
+    const [record] = await this.prisma.$queryRaw<
+      {
+        readonly userId: string;
+        readonly name: string;
+        readonly email: string;
+        readonly workspaceId: string | null;
+        readonly workspaceRole: "owner" | "admin" | "developer" | "viewer" | null;
+      }[]
+    >`
+      SELECT
+        u."id" AS "userId",
+        u."name",
+        u."email",
+        a."workspaceId",
+        m."role" AS "workspaceRole"
+      FROM "ApiKey" a
+      JOIN "User" u ON u."id" = a."userId"
+      LEFT JOIN "WorkspaceMember" m
+        ON m."workspaceId" = a."workspaceId" AND m."userId" = a."userId"
+      WHERE a."keyHash" = ${hashApiKey(apiKey)}
+        AND a."isActive" = true
+      LIMIT 1
+    `;
+
+    if (record) {
+      return {
+        id: record.userId,
+        name: record.name,
+        email: record.email,
+        apiKey,
+        workspaceId: record.workspaceId ?? undefined,
+        workspaceRole: record.workspaceRole ?? undefined,
       };
     }
 

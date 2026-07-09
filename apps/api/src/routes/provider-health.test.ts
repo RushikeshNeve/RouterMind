@@ -128,7 +128,7 @@ async function createHealthTestApp(
     requestLogStore: new InMemoryRequestLogStore(),
     routerDecisionLogStore: new InMemoryRouterDecisionLogStore(),
     providerHealthService,
-    retryPolicyService: new RetryPolicyService(undefined, undefined, () => undefined),
+    retryPolicyService: new RetryPolicyService(undefined, undefined, () => Promise.resolve()),
     providers:
       options.providers ??
       new Map([

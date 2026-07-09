@@ -69,6 +69,80 @@ Docker:
 docker compose up --build
 ```
 
+Production Docker:
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d
+```
+
+Readiness endpoint:
+
+```bash
+curl http://localhost:3000/ready
+```
+
+## Architecture
+
+```text
+Clients / OpenAI SDK / RouteMind SDK / CLI
+                 |
+          Fastify API Gateway
+                 |
+  Auth -> Workspace/RBAC -> Firewall -> Cache
+                 |
+ Routing + AI Planner + Budget/Quota Guardrails
+                 |
+     Resilience Layer: retry / fallback / circuit breaker
+                 |
+ OpenAI / Anthropic / Gemini / Groq / Mock Providers
+                 |
+ PostgreSQL logs, analytics, evaluations, cache metadata
+ Redis rate limiting and production coordination
+                 |
+ Next.js Developer Dashboard
+```
+
+## Production Features
+
+- Multi-tenant workspaces, roles, workspace API keys, and workspace-scoped usage.
+- OpenAI-compatible `/v1/chat/completions` and `/v1/models`.
+- AI planner, LLM-assisted routing, evaluation scores, retries, failover, and circuit breakers.
+- Budget guardrails, quotas, prompt firewall, semantic cache, analytics APIs, SDK, CLI, and dashboard.
+- Production Dockerfiles, `docker-compose.prod.yml`, `/health`, `/ready`, structured logs, CORS/body/rate-limit config, and vendor-neutral observability interfaces.
+
+## Dashboard Screenshots
+
+Screenshots placeholder:
+
+- Overview dashboard: `docs/assets/dashboard-overview.png`
+- Analytics dashboard: `docs/assets/dashboard-analytics.png`
+- Provider health: `docs/assets/dashboard-providers.png`
+
+## Deployment
+
+Full deployment notes are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+Production essentials:
+
+- Set `NODE_ENV=production`.
+- Use a real `CREDENTIAL_ENCRYPTION_KEY` and bootstrap `DEV_API_KEY`.
+- Run `npx prisma migrate deploy --schema apps/api/prisma/schema.prisma`.
+- Point the dashboard at the API with `NEXT_PUBLIC_ROUTEMIND_API_URL`.
+- Restrict browser access with `CORS_ORIGIN`.
+
+## Portfolio Resume Bullet
+
+Built RouteMind, a multi-tenant AI gateway platform with OpenAI-compatible APIs, intelligent model routing, execution planning, resilience, prompt firewalling, semantic caching, evaluation benchmarks, analytics, dashboard, SDK, CLI, Docker deployment, and production observability hooks.
+
+## Roadmap
+
+- Native streaming for live providers beyond simulated streaming.
+- Vector-backed semantic cache with pluggable embedding/search providers.
+- OpenTelemetry collector, Datadog, Grafana Tempo, and Langfuse integrations.
+- Dashboard workspace switcher and member management UI.
+- Hosted control plane and usage-based billing.
+
 ## OpenAI SDK Compatibility
 
 RouteMind can be used as an OpenAI-compatible base URL for existing apps. Point the official OpenAI SDK at RouteMind and keep using `chat.completions.create`.
@@ -224,6 +298,128 @@ Stats are also included in `/v1/analytics/summary` under `cache`:
   }
 }
 ```
+
+## Prompt Firewall
+
+RouteMind includes a prompt firewall and policy engine that inspects requests after authentication and validation, but before cache lookup, routing, planner execution, budget checks, resilience, and provider calls. This gives teams a governance layer in front of every LLM request.
+
+Built-in detections include:
+
+- Secrets: OpenAI-style `sk-...` keys, GitHub `ghp_...` tokens, AWS `AKIA...` keys, and bearer tokens.
+- PII: email addresses, phone-number-like values, PAN-like IDs, and Aadhaar-like IDs.
+- Prompt injection: phrases such as `ignore previous instructions`, `reveal system prompt`, `developer message`, `bypass policy`, and `jailbreak`.
+- Dangerous commands: `rm -rf /`, `format disk`, `delete system32`, credential theft, and secret exfiltration requests.
+- Suspicious hidden tool-use instructions.
+- Oversized prompts.
+
+Actions:
+
+- `block`: reject before routing/provider execution with an OpenAI-style error.
+- `warn`: continue and include firewall warning metadata.
+- `redact`: replace sensitive matches with `[REDACTED]` before routing/provider execution.
+
+Response metadata never returns raw secrets:
+
+```json
+{
+  "routemind": {
+    "firewall": {
+      "inspected": true,
+      "action": "redact",
+      "events": [
+        {
+          "type": "secret_detection",
+          "severity": "critical",
+          "action": "redact",
+          "message": "Secret-like OpenAI API key detected and redacted."
+        }
+      ]
+    }
+  }
+}
+```
+
+Create a custom policy rule:
+
+```bash
+curl -X POST http://localhost:3000/v1/firewall/rules \
+  -H "content-type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "name": "Block internal project names",
+    "type": "blocked_keyword",
+    "pattern": "confidential_project_x",
+    "action": "block"
+  }'
+```
+
+Firewall APIs:
+
+```bash
+curl http://localhost:3000/v1/firewall/events
+curl http://localhost:3000/v1/firewall/rules
+curl -X PATCH http://localhost:3000/v1/firewall/rules/rule_id \
+  -H "content-type: application/json" \
+  -d '{"action":"warn"}'
+curl -X DELETE http://localhost:3000/v1/firewall/rules/rule_id
+```
+
+Firewall analytics are included in `/v1/analytics/summary`:
+
+```json
+{
+  "firewall": {
+    "totalEvents": 18,
+    "blockedRequests": 3,
+    "redactedRequests": 9,
+    "warnings": 6,
+    "topRuleTypes": [{ "type": "secret_detection", "count": 9 }]
+  }
+}
+```
+
+## Team Workspaces
+
+RouteMind supports nullable workspace scoping so existing single-user setups continue to work while new teams can move toward multi-tenant usage. Workspace API keys attach `workspaceId` and member role during authentication, and gateway logs, cache entries, guardrails, provider attempts, router decisions, execution plans, firewall events, and analytics can be scoped by workspace.
+
+Roles:
+
+- `owner`: full access, billing/budgets, members, provider credentials, API keys.
+- `admin`: manage providers, API keys, analytics, and firewall rules.
+- `developer`: use API keys, create development keys, view own usage.
+- `viewer`: read-only analytics and health.
+
+Create a workspace:
+
+```bash
+curl -X POST http://localhost:3000/v1/workspaces \
+  -H "content-type: application/json" \
+  -d '{"name":"Acme AI","ownerUserId":"user_123"}'
+```
+
+Add a member:
+
+```bash
+curl -X POST http://localhost:3000/v1/workspaces/workspace_123/members \
+  -H "content-type: application/json" \
+  -d '{"actorUserId":"user_123","userId":"user_456","role":"developer"}'
+```
+
+Create a workspace API key:
+
+```bash
+curl -X POST http://localhost:3000/v1/workspaces/workspace_123/api-keys \
+  -H "content-type: application/json" \
+  -d '{"userId":"user_123","name":"Production Gateway"}'
+```
+
+Workspace analytics:
+
+```bash
+curl "http://localhost:3000/v1/analytics/summary?workspaceId=workspace_123"
+```
+
+Migration note: all workspace columns are nullable. Existing user-level API keys, provider credentials, model access, budgets, quotas, request logs, cache entries, and firewall events continue to behave as before when `workspaceId` is absent.
 
 ## Developer Dashboard
 

@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 
 export interface RouterDecisionLogEntry {
   readonly requestLogId?: string | undefined;
+  readonly workspaceId?: string | undefined;
   readonly userId: string;
   readonly mode: string;
   readonly routerModelUsed?: string | undefined;
@@ -29,6 +30,7 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
       INSERT INTO "RouterDecisionLog" (
         "id",
         "requestLogId",
+        "workspaceId",
         "userId",
         "mode",
         "routerModelUsed",
@@ -45,6 +47,7 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
       VALUES (
         ${randomUUID()},
         ${entry.requestLogId ?? null},
+        ${entry.workspaceId ?? null},
         ${entry.userId},
         ${entry.mode},
         ${entry.routerModelUsed ?? null},
