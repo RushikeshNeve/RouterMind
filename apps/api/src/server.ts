@@ -57,7 +57,7 @@ const app = await buildApp({
     },
     providers: async () => {
       const availability = await new PrismaUserAvailabilityStore(prisma, config).getAvailability({
-        id: "readiness",
+        id: "dev-user",
         name: "readiness",
         email: "readiness@routemind.local",
         apiKey: config.DEV_API_KEY,
