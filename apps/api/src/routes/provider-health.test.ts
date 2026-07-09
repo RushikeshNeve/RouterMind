@@ -10,6 +10,7 @@ import { StaticApiKeyAuthenticator } from "../infrastructure/authenticator.js";
 import { InMemoryProviderHealthService } from "../infrastructure/provider-health-service.js";
 import { InMemoryRateLimiter } from "../infrastructure/rate-limiter.js";
 import { InMemoryRequestLogStore } from "../infrastructure/request-log-store.js";
+import { RetryPolicyService } from "../infrastructure/retry-policy-service.js";
 import { InMemoryRouterDecisionLogStore } from "../infrastructure/router-decision-log-store.js";
 import { StaticUserAvailabilityStore } from "../infrastructure/user-availability.js";
 
@@ -127,6 +128,7 @@ async function createHealthTestApp(
     requestLogStore: new InMemoryRequestLogStore(),
     routerDecisionLogStore: new InMemoryRouterDecisionLogStore(),
     providerHealthService,
+    retryPolicyService: new RetryPolicyService(undefined, undefined, () => Promise.resolve()),
     providers:
       options.providers ??
       new Map([
@@ -188,7 +190,7 @@ describe("provider health monitoring", () => {
     });
     const metric = await providerHealthService.get("openai", "gpt-4o-mini");
 
-    expect(response.statusCode).toBe(429);
+    expect(response.statusCode).toBe(502);
     expect(metric).toMatchObject({
       status: "down",
       successRate: 0,

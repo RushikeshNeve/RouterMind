@@ -12,10 +12,11 @@ export interface RateLimiter {
 }
 
 export class RedisRateLimiter implements RateLimiter {
-  private readonly windowSeconds = 60 * 60;
-  private readonly limit = 100;
-
-  constructor(private readonly redis: Redis) {}
+  constructor(
+    private readonly redis: Redis,
+    private readonly limit = 100,
+    private readonly windowSeconds = 60 * 60,
+  ) {}
 
   async consume(apiKey: string): Promise<RateLimitResult> {
     const key = `rate-limit:${apiKey}`;

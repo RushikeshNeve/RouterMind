@@ -32,7 +32,7 @@
       "path": "packages/sdk"
     },
     {
-      "path": "apps/dashboard"
+      "path": "packages/cli"
     },
     {
       "path": "apps/api"

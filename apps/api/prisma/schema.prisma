@@ -17,6 +17,7 @@ model GatewayMetadata {
 
 model RequestLog {
   id                          String   @id @default(cuid())
+  workspaceId                 String?
   apiKey                      String
   requestedModel              String
   selectedModel               String?
@@ -33,7 +34,75 @@ model RequestLog {
   routingMode                 String?
   routingStrategy             String?
   createdAt                   DateTime @default(now())
-  routerDecisions RouterDecisionLog[]
+  routerDecisions  RouterDecisionLog[]
+  providerAttempts ProviderAttemptLog[]
+  executionPlans   ExecutionPlanLog[]
+  firewallEvents   FirewallEvent[]
+
+  @@index([workspaceId])
+}
+
+model CircuitBreakerState {
+  id            String   @id @default(cuid())
+  provider      String
+  model         String
+  state         String   @default("CLOSED")
+  failureCount  Int      @default(0)
+  openedAt      DateTime?
+  halfOpenAt    DateTime?
+  lastFailureAt DateTime?
+  lastSuccessAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([provider, model])
+  @@index([provider])
+  @@index([model])
+}
+
+model ProviderAttemptLog {
+  id           String   @id @default(cuid())
+  requestLogId String?
+  workspaceId  String?
+  userId       String
+  provider     String
+  model        String
+  attemptNumber Int
+  status       String
+  latencyMs    Int
+  errorType    String?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  requestLog   RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+
+  @@index([requestLogId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([provider])
+  @@index([model])
+  @@index([createdAt])
+}
+
+model ExecutionPlanLog {
+  id               String      @id @default(cuid())
+  requestLogId     String?
+  workspaceId      String?
+  userId           String
+  planType         String
+  stepsJson        Json
+  estimatedCostUsd Float
+  actualCostUsd    Float?
+  confidence       Float
+  reason           String
+  executed         Boolean
+  createdAt        DateTime    @default(now())
+  requestLog       RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+
+  @@index([requestLogId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([planType])
+  @@index([createdAt])
 }
 
 model ProviderHealthMetric {
@@ -63,6 +132,7 @@ model ProviderHealthMetric {
 model RouterDecisionLog {
   id                  String   @id @default(cuid())
   requestLogId        String?
+  workspaceId         String?
   userId              String
   mode                String
   routerModelUsed     String?
@@ -79,6 +149,7 @@ model RouterDecisionLog {
 
   @@index([requestLogId])
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model User {
@@ -89,23 +160,29 @@ model User {
   apiKeys             ApiKey[]
   providerCredentials ProviderCredential[]
   modelAccess         UserModelAccess[]
+  budgets             UserBudget[]
+  quotas                UsageQuota[]
+  workspaceMembers      WorkspaceMember[]
 }
 
 model ApiKey {
   id        String   @id @default(cuid())
   keyHash   String   @unique
   userId    String
+  workspaceId String?
   name      String
   createdAt DateTime @default(now())
   isActive  Boolean  @default(true)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model ProviderCredential {
   id              String   @id @default(cuid())
   userId          String
+  workspaceId     String?
   provider        String
   encryptedApiKey String
   isEnabled       Boolean  @default(true)
@@ -115,11 +192,13 @@ model ProviderCredential {
 
   @@unique([userId, provider])
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model UserModelAccess {
   id        String  @id @default(cuid())
   userId    String
+  workspaceId String?
   provider  String
   model     String
   isEnabled Boolean @default(true)
@@ -127,4 +206,201 @@ model UserModelAccess {
 
   @@unique([userId, provider, model])
   @@index([userId])
+  @@index([workspaceId])
+}
+
+model UserBudget {
+  id              String   @id @default(cuid())
+  userId          String
+  workspaceId     String?
+  period          String
+  maxSpendUsd     Float
+  currentSpendUsd Float    @default(0)
+  resetAt         DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model UsageQuota {
+  id              String   @id @default(cuid())
+  userId          String
+  workspaceId     String?
+  period          String
+  maxRequests     Int
+  currentRequests Int      @default(0)
+  maxTokens       Int
+  currentTokens   Int      @default(0)
+  resetAt         DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model EvaluationDataset {
+  id          String           @id @default(cuid())
+  name        String
+  description String?
+  taskType    String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  cases       EvaluationCase[]
+  runs        EvaluationRun[]
+
+  @@index([taskType])
+  @@index([createdAt])
+}
+
+model EvaluationCase {
+  id                String            @id @default(cuid())
+  datasetId         String
+  inputMessagesJson Json
+  expectedOutput    String
+  gradingRubric     String
+  metadataJson      Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  dataset           EvaluationDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  results           EvaluationResult[]
+
+  @@index([datasetId])
+  @@index([createdAt])
+}
+
+model EvaluationRun {
+  id           String             @id @default(cuid())
+  datasetId    String
+  model        String
+  provider     String
+  status       String             @default("pending")
+  totalCases   Int                @default(0)
+  passedCases  Int                @default(0)
+  averageScore Float              @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime           @default(now())
+  dataset      EvaluationDataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  results      EvaluationResult[]
+
+  @@index([datasetId])
+  @@index([provider])
+  @@index([model])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model EvaluationResult {
+  id          String        @id @default(cuid())
+  runId       String
+  caseId      String
+  modelOutput String
+  score       Float
+  passed      Boolean
+  judgeReason String
+  latencyMs   Int
+  costUsd     Float
+  createdAt   DateTime      @default(now())
+  run         EvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  case        EvaluationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([caseId])
+  @@index([createdAt])
+}
+
+model LLMResponseCache {
+  id                   String   @id @default(cuid())
+  userId               String
+  workspaceId          String?
+  cacheKey             String   @unique
+  normalizedPromptHash String
+  promptText           String
+  responseJson         Json
+  model                String
+  provider             String
+  inputTokens          Int
+  outputTokens         Int
+  costSavedUsd         Float    @default(0)
+  hitCount             Int      @default(0)
+  expiresAt            DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([normalizedPromptHash])
+  @@index([expiresAt])
+}
+
+model PolicyRule {
+  id        String   @id @default(cuid())
+  userId    String?
+  name      String
+  type      String
+  pattern   String?
+  action    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([isActive])
+}
+
+model FirewallEvent {
+  id           String      @id @default(cuid())
+  userId       String
+  workspaceId  String?
+  requestLogId String?
+  ruleId       String?
+  type         String
+  action       String
+  severity     String
+  matchedText  String?
+  message      String
+  createdAt    DateTime    @default(now())
+  requestLog   RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([requestLogId])
+  @@index([ruleId])
+  @@index([type])
+  @@index([action])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+model Workspace {
+  id        String            @id @default(cuid())
+  name      String
+  slug      String            @unique
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  members   WorkspaceMember[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([role])
 }

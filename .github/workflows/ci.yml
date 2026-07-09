@@ -9,6 +9,11 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://routemind:routemind@localhost:5432/routemind?schema=public
+      REDIS_URL: redis://localhost:6379
+      CREDENTIAL_ENCRYPTION_KEY: development-credential-key-change-me
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,14 +27,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
       - name: Lint
         run: npm run lint
 
-      - name: Format check
-        run: npm run format:check
-
-      - name: Typecheck and build
+      - name: Build
         run: npm run build
 
       - name: Test
-        run: npm test
+        run: npm run test

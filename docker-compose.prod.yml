@@ -1,0 +1,92 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://routemind:${POSTGRES_PASSWORD:-routemind}@postgres:5432/routemind?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+      DEV_API_KEY: ${DEV_API_KEY}
+      ROUTEMIND_API_URL: ${ROUTEMIND_API_URL:-http://localhost:3000}
+      PROVIDER_MODE: ${PROVIDER_MODE:-mock}
+      PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-30000}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3002}
+      REQUEST_BODY_LIMIT_BYTES: ${REQUEST_BODY_LIMIT_BYTES:-1048576}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-3600}
+    command: sh -c "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        NEXT_PUBLIC_ROUTEMIND_API_URL: ${NEXT_PUBLIC_ROUTEMIND_API_URL:-http://localhost:3000}
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_ROUTEMIND_API_URL: ${NEXT_PUBLIC_ROUTEMIND_API_URL:-http://localhost:3000}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/dashboard || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: routemind
+      POSTGRES_USER: routemind
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-routemind}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routemind -d routemind"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - routemind-postgres-prod:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - routemind-redis-prod:/data
+    restart: unless-stopped
+
+volumes:
+  routemind-postgres-prod:
+  routemind-redis-prod:

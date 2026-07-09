@@ -40,6 +40,27 @@ describe("provider factory", () => {
     expect(registry.get("anthropic")?.supportedModels).toContain("claude-3-5-sonnet");
   });
 
+  it("mock providers stream small content chunks", async () => {
+    const registry = createProviderRegistry({
+      mode: "mock",
+      timeoutMs: 30_000,
+      apiKeys: {},
+    });
+    const provider = registry.get("openai");
+
+    if (!provider?.streamChatCompletion) {
+      throw new Error("Expected mock provider to support streaming.");
+    }
+
+    const chunks: string[] = [];
+    for await (const chunk of provider.streamChatCompletion(request)) {
+      chunks.push(chunk.content);
+    }
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toContain("Mock openai response");
+  });
+
   it("returns live providers in live mode", () => {
     const registry = createProviderRegistry({
       mode: "live",

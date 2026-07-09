@@ -10,6 +10,7 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/.turbo/**",
       "**/.next/**",
+      "**/next-env.d.ts",
       "package-lock.json",
     ],
   },
@@ -20,7 +21,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["*.ts"],
+          allowDefaultProject: ["*.ts", "apps/dashboard/tailwind.config.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
       },

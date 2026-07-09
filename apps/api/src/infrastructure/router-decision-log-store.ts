@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 
 export interface RouterDecisionLogEntry {
   readonly requestLogId?: string | undefined;
+  readonly workspaceId?: string | undefined;
   readonly userId: string;
   readonly mode: string;
   readonly routerModelUsed?: string | undefined;
@@ -14,6 +15,7 @@ export interface RouterDecisionLogEntry {
   readonly confidence?: number | undefined;
   readonly reason?: string | undefined;
   readonly fallbackUsed: boolean;
+  readonly createdAt?: Date;
 }
 
 export interface RouterDecisionLogStore {
@@ -28,6 +30,7 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
       INSERT INTO "RouterDecisionLog" (
         "id",
         "requestLogId",
+        "workspaceId",
         "userId",
         "mode",
         "routerModelUsed",
@@ -38,11 +41,13 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
         "selectedProvider",
         "confidence",
         "reason",
-        "fallbackUsed"
+        "fallbackUsed",
+        "createdAt"
       )
       VALUES (
         ${randomUUID()},
         ${entry.requestLogId ?? null},
+        ${entry.workspaceId ?? null},
         ${entry.userId},
         ${entry.mode},
         ${entry.routerModelUsed ?? null},
@@ -53,17 +58,24 @@ export class PrismaRouterDecisionLogStore implements RouterDecisionLogStore {
         ${entry.selectedProvider ?? null},
         ${entry.confidence ?? null},
         ${entry.reason ?? null},
-        ${entry.fallbackUsed}
+        ${entry.fallbackUsed},
+        ${entry.createdAt ?? new Date()}
       )
     `;
   }
 }
 
 export class InMemoryRouterDecisionLogStore implements RouterDecisionLogStore {
-  readonly entries: RouterDecisionLogEntry[] = [];
+  readonly entries: Array<
+    RouterDecisionLogEntry & { readonly id: string; readonly createdAt: Date }
+  > = [];
 
   create(entry: RouterDecisionLogEntry): Promise<void> {
-    this.entries.push(entry);
+    this.entries.push({
+      ...entry,
+      id: randomUUID(),
+      createdAt: entry.createdAt ?? new Date(),
+    });
     return Promise.resolve();
   }
 }

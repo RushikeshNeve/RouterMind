@@ -1,0 +1,50 @@
+{
+  "name": "@routemind/cli",
+  "version": "0.1.0",
+  "description": "Developer CLI for the RouteMind AI Gateway.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "routemind": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/routemind/routemind.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "routemind",
+    "ai-gateway",
+    "llm",
+    "cli",
+    "developer-tools",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@routemind/sdk": "0.1.0",
+    "chalk": "^5.4.1",
+    "commander": "^12.1.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1"
+  }
+}

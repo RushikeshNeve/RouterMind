@@ -7,10 +7,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist",
-    "db:migrate": "dotenv -e ../../.env -- prisma migrate dev --schema prisma/schema.prisma",
+    "db:migrate": "npx --yes --package dotenv-cli@8.0.0 --package prisma@6.19.3 dotenv -e ../../.env -- prisma migrate dev --schema prisma/schema.prisma --skip-generate",
     "dev": "tsx watch src/server.ts",
-    "prisma:generate": "dotenv -e ../../.env -- prisma generate --schema prisma/schema.prisma",
-    "seed:dev": "dotenv -e ../../.env -- tsx src/scripts/seed-dev.ts",
+    "prisma:generate": "npx --yes --package dotenv-cli@8.0.0 --package prisma@6.19.3 dotenv -e ../../.env -- prisma generate --schema prisma/schema.prisma",
+    "seed:dev": "npx --yes tsx@4.20.6 src/scripts/seed-dev.ts",
     "start": "node dist/server.js"
   },
   "dependencies": {

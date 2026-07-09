@@ -43,7 +43,7 @@ export interface ChatCompletionRequest {
   readonly model: string;
   readonly messages: readonly ChatMessage[];
   readonly temperature?: number;
-  readonly stream?: false;
+  readonly stream?: boolean;
   readonly estimatedUsage: {
     readonly inputTokens: number;
     readonly outputTokens: number;

@@ -1,22 +1,41 @@
 {
   "name": "@routemind/sdk",
   "version": "0.1.0",
-  "private": true,
+  "description": "TypeScript SDK for the RouteMind AI Gateway.",
   "type": "module",
+  "license": "MIT",
+  "author": "RouteMind",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/routemind/routemind.git",
+    "directory": "packages/sdk"
+  },
+  "keywords": [
+    "routemind",
+    "ai-gateway",
+    "llm",
+    "routing",
+    "ai-routing",
+    "typescript",
+    "sdk"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist"
-  },
-  "dependencies": {
-    "@routemind/core": "0.1.0"
   },
   "devDependencies": {
     "rimraf": "^6.0.1"

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export interface RequestLogEntry {
+  readonly workspaceId?: string;
   readonly apiKey: string;
   readonly requestedModel: string;
   readonly selectedModel?: string;
@@ -17,6 +18,7 @@ export interface RequestLogEntry {
   readonly providerSuccessRateAtRouting?: number;
   readonly routingMode?: string;
   readonly routingStrategy?: string;
+  readonly createdAt?: Date;
 }
 
 export interface RequestLogStore {
@@ -32,6 +34,7 @@ export class PrismaRequestLogStore implements RequestLogStore {
     await this.prisma.$executeRaw`
       INSERT INTO "RequestLog" (
         "id",
+        "workspaceId",
         "apiKey",
         "requestedModel",
         "selectedModel",
@@ -46,10 +49,12 @@ export class PrismaRequestLogStore implements RequestLogStore {
         "providerAvgLatencyAtRouting",
         "providerSuccessRateAtRouting",
         "routingMode",
-        "routingStrategy"
+        "routingStrategy",
+        "createdAt"
       )
       VALUES (
         ${id},
+        ${entry.workspaceId ?? null},
         ${entry.apiKey},
         ${entry.requestedModel},
         ${entry.selectedModel ?? null},
@@ -64,7 +69,8 @@ export class PrismaRequestLogStore implements RequestLogStore {
         ${entry.providerAvgLatencyAtRouting ?? null},
         ${entry.providerSuccessRateAtRouting ?? null},
         ${entry.routingMode ?? null},
-        ${entry.routingStrategy ?? null}
+        ${entry.routingStrategy ?? null},
+        ${entry.createdAt ?? new Date()}
       )
     `;
 
@@ -73,11 +79,15 @@ export class PrismaRequestLogStore implements RequestLogStore {
 }
 
 export class InMemoryRequestLogStore implements RequestLogStore {
-  readonly entries: RequestLogEntry[] = [];
+  readonly entries: Array<RequestLogEntry & { readonly id: string; readonly createdAt: Date }> = [];
 
   create(entry: RequestLogEntry): Promise<string> {
     const id = `request_log_${this.entries.length + 1}`;
-    this.entries.push(entry);
+    this.entries.push({
+      ...entry,
+      id,
+      createdAt: entry.createdAt ?? new Date(),
+    });
     return Promise.resolve(id);
   }
 }

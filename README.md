@@ -2,7 +2,7 @@
 
 RouteMind is a production-grade AI Gateway foundation for routing requests across multiple LLM providers based on cost, latency, model capabilities, availability, and enterprise routing policies.
 
-This repository is at backend MVP stage. It establishes architecture, contracts, development workflow, mock providers for local development, and live provider adapters for OpenAI, Anthropic, Gemini, and Groq.
+This repository includes a backend AI Gateway and a developer dashboard for monitoring routing, provider health, resilience, cost, and request analytics.
 
 ## What RouteMind Is
 
@@ -19,6 +19,7 @@ This repository is at backend MVP stage. It establishes architecture, contracts,
 ## Stack
 
 - Node.js, TypeScript, Fastify
+- Next.js, React, Tailwind CSS, Recharts
 - PostgreSQL, Redis, Prisma
 - Zod, Pino
 - Vitest
@@ -36,10 +37,25 @@ npm run seed:dev
 npm run dev
 ```
 
+Run the dashboard in another terminal:
+
+```bash
+npm run dev -w @routemind/dashboard
+```
+
+The dashboard reads the API base URL from:
+
+```env
+NEXT_PUBLIC_ROUTEMIND_API_URL=http://localhost:3000
+```
+
+If the variable is not set, it defaults to `http://localhost:3000`.
+
 RouteMind can be used in two modes:
 
 - Server mode: run the Fastify gateway and call its HTTP API.
 - SDK mode: install/use `@routemind/sdk` and call `client.chat.completions.create()`.
+- CLI mode: install/use `@routemind/cli` and run `routemind chat "..."`.
 
 Health endpoint:
 
@@ -51,6 +67,397 @@ Docker:
 
 ```bash
 docker compose up --build
+```
+
+Production Docker:
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d
+```
+
+Readiness endpoint:
+
+```bash
+curl http://localhost:3000/ready
+```
+
+## Architecture
+
+```text
+Clients / OpenAI SDK / RouteMind SDK / CLI
+                 |
+          Fastify API Gateway
+                 |
+  Auth -> Workspace/RBAC -> Firewall -> Cache
+                 |
+ Routing + AI Planner + Budget/Quota Guardrails
+                 |
+     Resilience Layer: retry / fallback / circuit breaker
+                 |
+ OpenAI / Anthropic / Gemini / Groq / Mock Providers
+                 |
+ PostgreSQL logs, analytics, evaluations, cache metadata
+ Redis rate limiting and production coordination
+                 |
+ Next.js Developer Dashboard
+```
+
+## Production Features
+
+- Multi-tenant workspaces, roles, workspace API keys, and workspace-scoped usage.
+- OpenAI-compatible `/v1/chat/completions` and `/v1/models`.
+- AI planner, LLM-assisted routing, evaluation scores, retries, failover, and circuit breakers.
+- Budget guardrails, quotas, prompt firewall, semantic cache, analytics APIs, SDK, CLI, and dashboard.
+- Production Dockerfiles, `docker-compose.prod.yml`, `/health`, `/ready`, structured logs, CORS/body/rate-limit config, and vendor-neutral observability interfaces.
+
+## Dashboard Screenshots
+
+Screenshots placeholder:
+
+- Overview dashboard: `docs/assets/dashboard-overview.png`
+- Analytics dashboard: `docs/assets/dashboard-analytics.png`
+- Provider health: `docs/assets/dashboard-providers.png`
+
+## Deployment
+
+Full deployment notes are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+Production essentials:
+
+- Set `NODE_ENV=production`.
+- Use a real `CREDENTIAL_ENCRYPTION_KEY` and bootstrap `DEV_API_KEY`.
+- Run `npx prisma migrate deploy --schema apps/api/prisma/schema.prisma`.
+- Point the dashboard at the API with `NEXT_PUBLIC_ROUTEMIND_API_URL`.
+- Restrict browser access with `CORS_ORIGIN`.
+
+## Portfolio Resume Bullet
+
+Built RouteMind, a multi-tenant AI gateway platform with OpenAI-compatible APIs, intelligent model routing, execution planning, resilience, prompt firewalling, semantic caching, evaluation benchmarks, analytics, dashboard, SDK, CLI, Docker deployment, and production observability hooks.
+
+## Roadmap
+
+- Native streaming for live providers beyond simulated streaming.
+- Vector-backed semantic cache with pluggable embedding/search providers.
+- OpenTelemetry collector, Datadog, Grafana Tempo, and Langfuse integrations.
+- Dashboard workspace switcher and member management UI.
+- Hosted control plane and usage-based billing.
+
+## OpenAI SDK Compatibility
+
+RouteMind can be used as an OpenAI-compatible base URL for existing apps. Point the official OpenAI SDK at RouteMind and keep using `chat.completions.create`.
+
+```ts
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.ROUTEMIND_API_KEY,
+  baseURL: "http://localhost:3000/v1",
+});
+
+const response = await openai.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "Help me debug this code" }],
+});
+```
+
+Authentication supports both headers:
+
+```http
+Authorization: Bearer rm_live_xxx
+x-api-key: rm_live_xxx
+```
+
+`POST /v1/chat/completions` accepts common OpenAI request fields including `model`, `messages`, `temperature`, `max_tokens`, `top_p`, `presence_penalty`, `frequency_penalty`, `stop`, and `stream: false`. Unsupported optional fields are safely ignored for now when their types are valid.
+
+Responses keep the standard OpenAI shape and add RouteMind metadata under `routemind`:
+
+```json
+{
+  "id": "chatcmpl_...",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "..."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 20,
+    "total_tokens": 30
+  },
+  "routemind": {
+    "routing": {},
+    "resilience": {},
+    "costGuardrails": {},
+    "executionPlan": {}
+  }
+}
+```
+
+List models with:
+
+```bash
+curl http://localhost:3000/v1/models
+curl http://localhost:3000/v1/models -H "Authorization: Bearer rm_test_your_key"
+```
+
+Unauthenticated requests return the public registry plus `auto`. Authenticated requests return `auto` and the user's enabled models.
+
+Streaming is supported over Server-Sent Events:
+
+```ts
+const stream = await openai.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "Help me debug this code" }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? "");
+}
+```
+
+Raw SSE responses use OpenAI-compatible chunks and finish with RouteMind metadata before `[DONE]`:
+
+```text
+data: {"id":"chatcmpl_...","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"routemind":{"routing":{},"resilience":{},"costGuardrails":{},"executionPlan":{}}}
+
+data: [DONE]
+```
+
+## Semantic Response Cache
+
+RouteMind can cache successful non-streaming chat completions before provider execution. This reduces repeated LLM calls, latency, and spend while preserving the normal auth, validation, routing, resilience, budget, and logging flow on cache misses.
+
+Cache modes:
+
+- `disabled`: never read or write cache.
+- `exact`: cache normalized prompt matches. This is the MVP default.
+- `semantic`: accepted today, but falls back to exact matching while embedding/vector search providers are added.
+
+Request example:
+
+```json
+{
+  "model": "auto",
+  "messages": [{ "role": "user", "content": "Summarize this incident report" }],
+  "cache": {
+    "mode": "exact",
+    "ttlSeconds": 3600,
+    "similarityThreshold": 0.92,
+    "bypass": false
+  }
+}
+```
+
+Exact cache keys include the user, normalized messages, requested model, routing strategy, and temperature. RouteMind normalizes whitespace and casing outside code blocks while preserving fenced code blocks. Cache hits return immediately with metadata:
+
+```json
+{
+  "routemind": {
+    "cache": {
+      "hit": true,
+      "mode": "exact",
+      "costSavedUsd": 0.0021,
+      "originalModel": "gpt-4o",
+      "originalProvider": "openai"
+    }
+  }
+}
+```
+
+RouteMind does not cache streaming requests, errors, requests with `cache.bypass: true`, requests above `temperature: 0.7`, or unsupported tool-call style responses.
+
+Cache APIs:
+
+```bash
+curl http://localhost:3000/v1/cache/stats
+curl http://localhost:3000/v1/cache/entries
+curl -X DELETE http://localhost:3000/v1/cache
+```
+
+Stats are also included in `/v1/analytics/summary` under `cache`:
+
+```json
+{
+  "cache": {
+    "cacheHits": 42,
+    "cacheMisses": 108,
+    "estimatedCostSavedUsd": 1.84,
+    "cacheHitRate": 0.28
+  }
+}
+```
+
+## Prompt Firewall
+
+RouteMind includes a prompt firewall and policy engine that inspects requests after authentication and validation, but before cache lookup, routing, planner execution, budget checks, resilience, and provider calls. This gives teams a governance layer in front of every LLM request.
+
+Built-in detections include:
+
+- Secrets: OpenAI-style `sk-...` keys, GitHub `ghp_...` tokens, AWS `AKIA...` keys, and bearer tokens.
+- PII: email addresses, phone-number-like values, PAN-like IDs, and Aadhaar-like IDs.
+- Prompt injection: phrases such as `ignore previous instructions`, `reveal system prompt`, `developer message`, `bypass policy`, and `jailbreak`.
+- Dangerous commands: `rm -rf /`, `format disk`, `delete system32`, credential theft, and secret exfiltration requests.
+- Suspicious hidden tool-use instructions.
+- Oversized prompts.
+
+Actions:
+
+- `block`: reject before routing/provider execution with an OpenAI-style error.
+- `warn`: continue and include firewall warning metadata.
+- `redact`: replace sensitive matches with `[REDACTED]` before routing/provider execution.
+
+Response metadata never returns raw secrets:
+
+```json
+{
+  "routemind": {
+    "firewall": {
+      "inspected": true,
+      "action": "redact",
+      "events": [
+        {
+          "type": "secret_detection",
+          "severity": "critical",
+          "action": "redact",
+          "message": "Secret-like OpenAI API key detected and redacted."
+        }
+      ]
+    }
+  }
+}
+```
+
+Create a custom policy rule:
+
+```bash
+curl -X POST http://localhost:3000/v1/firewall/rules \
+  -H "content-type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "name": "Block internal project names",
+    "type": "blocked_keyword",
+    "pattern": "confidential_project_x",
+    "action": "block"
+  }'
+```
+
+Firewall APIs:
+
+```bash
+curl http://localhost:3000/v1/firewall/events
+curl http://localhost:3000/v1/firewall/rules
+curl -X PATCH http://localhost:3000/v1/firewall/rules/rule_id \
+  -H "content-type: application/json" \
+  -d '{"action":"warn"}'
+curl -X DELETE http://localhost:3000/v1/firewall/rules/rule_id
+```
+
+Firewall analytics are included in `/v1/analytics/summary`:
+
+```json
+{
+  "firewall": {
+    "totalEvents": 18,
+    "blockedRequests": 3,
+    "redactedRequests": 9,
+    "warnings": 6,
+    "topRuleTypes": [{ "type": "secret_detection", "count": 9 }]
+  }
+}
+```
+
+## Team Workspaces
+
+RouteMind supports nullable workspace scoping so existing single-user setups continue to work while new teams can move toward multi-tenant usage. Workspace API keys attach `workspaceId` and member role during authentication, and gateway logs, cache entries, guardrails, provider attempts, router decisions, execution plans, firewall events, and analytics can be scoped by workspace.
+
+Roles:
+
+- `owner`: full access, billing/budgets, members, provider credentials, API keys.
+- `admin`: manage providers, API keys, analytics, and firewall rules.
+- `developer`: use API keys, create development keys, view own usage.
+- `viewer`: read-only analytics and health.
+
+Create a workspace:
+
+```bash
+curl -X POST http://localhost:3000/v1/workspaces \
+  -H "content-type: application/json" \
+  -d '{"name":"Acme AI","ownerUserId":"user_123"}'
+```
+
+Add a member:
+
+```bash
+curl -X POST http://localhost:3000/v1/workspaces/workspace_123/members \
+  -H "content-type: application/json" \
+  -d '{"actorUserId":"user_123","userId":"user_456","role":"developer"}'
+```
+
+Create a workspace API key:
+
+```bash
+curl -X POST http://localhost:3000/v1/workspaces/workspace_123/api-keys \
+  -H "content-type: application/json" \
+  -d '{"userId":"user_123","name":"Production Gateway"}'
+```
+
+Workspace analytics:
+
+```bash
+curl "http://localhost:3000/v1/analytics/summary?workspaceId=workspace_123"
+```
+
+Migration note: all workspace columns are nullable. Existing user-level API keys, provider credentials, model access, budgets, quotas, request logs, cache entries, and firewall events continue to behave as before when `workspaceId` is absent.
+
+## Developer Dashboard
+
+The dashboard lives in `apps/dashboard` and is available at `http://localhost:3001/dashboard` during local development.
+
+Pages:
+
+- `/dashboard`: overview KPIs, spend/request charts, provider/model distribution, health and recent requests
+- `/dashboard/analytics`: detailed model, provider, error, cost, and latency analytics
+- `/dashboard/models`: model usage and routing performance
+- `/dashboard/providers`: provider/model health, reliability, latency, and sample counts
+- `/dashboard/costs`: spend trend, top models/providers by spend, budget and quota signals
+- `/dashboard/resilience`: circuit breakers, provider attempts, fallback and retry signals
+- `/dashboard/evaluations`: datasets, recent runs, and model quality scores
+- `/dashboard/requests`: recent request logs
+
+The UI uses existing backend APIs:
+
+- `/v1/analytics/summary`
+- `/v1/analytics/models`
+- `/v1/analytics/providers`
+- `/v1/analytics/errors`
+- `/v1/analytics/costs`
+- `/v1/analytics/latency`
+- `/v1/analytics/requests?limit=50`
+- `/v1/evaluations/datasets`
+- `/v1/evaluations/runs`
+- `/v1/evaluations/scores`
+- `/v1/health/providers`
+- `/v1/resilience/circuit-breakers`
+- `/v1/resilience/provider-attempts`
+
+When the API is unavailable, the dashboard shows a clear demo-data banner so the frontend can still be reviewed locally.
+
+Build the full workspace, including the dashboard:
+
+```bash
+npm run build
 ```
 
 ## MVP API
@@ -110,17 +517,63 @@ Sample response:
     "outputTokens": 300,
     "estimatedCost": 0.004518,
     "latencyMs": 12,
-    "routingReason": "matched code/debug prompt"
-  }
-}
-```
-
-Streaming is intentionally disabled in the MVP. Requests with `"stream": true` return `400` with:
-
-```json
-{
-  "error": {
-    "message": "Streaming is not supported in MVP yet."
+    "routingReason": "matched code/debug prompt",
+    "resilience": {
+      "primaryProvider": "anthropic",
+      "primaryModel": "claude-3-5-sonnet",
+      "finalProvider": "anthropic",
+      "finalModel": "claude-3-5-sonnet",
+      "fallbackUsed": false,
+      "circuitBreakerTriggered": false,
+      "attempts": [
+        {
+          "provider": "anthropic",
+          "model": "claude-3-5-sonnet",
+          "attemptNumber": 1,
+          "status": "success",
+          "latencyMs": 12
+        }
+      ]
+    }
+  },
+  "resilience": {
+    "primaryProvider": "anthropic",
+    "primaryModel": "claude-3-5-sonnet",
+    "finalProvider": "anthropic",
+    "finalModel": "claude-3-5-sonnet",
+    "fallbackUsed": false,
+    "circuitBreakerTriggered": false,
+    "attempts": [
+      {
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "attemptNumber": 1,
+        "status": "success",
+        "latencyMs": 12
+      }
+    ]
+  },
+  "executionPlan": {
+    "planType": "single_model",
+    "steps": [
+      {
+        "step": 1,
+        "purpose": "answer_user_request",
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "reason": "Best fit for medium-complexity debugging task."
+      }
+    ],
+    "estimatedCostUsd": 0.004518,
+    "actualCostUsd": 0.004518,
+    "confidence": 0.86,
+    "reason": "Use the normal routed model as a single-step execution plan.",
+    "executed": true
+  },
+  "routingMetadata": {
+    "mode": "llm_assisted",
+    "routingStrategy": "balanced",
+    "fallbackUsed": false
   }
 }
 ```
@@ -167,26 +620,136 @@ Registered chat models include:
 
 ## SDK Usage
 
-The SDK package lives at `packages/sdk` and exposes the npm package name `@routemind/sdk`.
+The SDK package lives at `packages/sdk` and is prepared for the public npm package name `@routemind/sdk`.
 
 ```ts
-import { RouteMind } from "@routemind/sdk";
+import { BudgetExceededError, RateLimitError, RouteMind, RouteMindError } from "@routemind/sdk";
 
 const client = new RouteMind({
-  apiKey: "rm_test_your_generated_key",
+  apiKey: process.env.ROUTEMIND_API_KEY,
   baseUrl: "http://localhost:3000",
   timeoutMs: 30000,
   maxRetries: 2,
+  requestId: () => crypto.randomUUID(),
+  headers: {
+    "x-workspace-id": "workspace_123",
+  },
 });
 
-const response = await client.chat.completions.create({
+try {
+  const response = await client.chat.completions.create({
+    model: "auto",
+    messages: [{ role: "user", content: "Help me debug this code" }],
+    temperature: 0.7,
+    routing: {
+      mode: "llm_assisted",
+      strategy: "balanced",
+      executionPlan: "auto",
+    },
+  });
+
+  console.log(response.choices[0]?.message.content);
+  console.log(response.routingMetadata, response.executionPlan);
+} catch (error) {
+  if (error instanceof BudgetExceededError) {
+    console.error("RouteMind budget guardrail blocked this request.");
+  } else if (error instanceof RateLimitError) {
+    console.error("RouteMind rate limit hit; retry later.");
+  } else if (error instanceof RouteMindError) {
+    console.error(error.code, error.statusCode, error.message);
+  }
+}
+```
+
+Streaming with the RouteMind SDK:
+
+```ts
+const stream = client.chat.completions.create({
   model: "auto",
-  messages: [{ role: "user", content: "Help me debug this code" }],
-  temperature: 0.7,
+  messages: [{ role: "user", content: "Stream this answer" }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  if ("choices" in chunk) {
+    process.stdout.write(chunk.choices[0]?.delta.content ?? "");
+  }
+}
+```
+
+The SDK includes TypeScript request/response types, mapped error classes, timeout handling, retry handling for transient failures, request ID support, custom headers, configurable `baseUrl`, and browser-safe fetch support where the runtime provides `fetch`.
+
+Additional methods:
+
+```ts
+await client.health.providers.list();
+await client.analytics.summary({ from: "2026-07-07T00:00:00.000Z" });
+await client.resilience.circuitBreakers.list();
+await client.users.create({ name: "Rushikesh", email: "rushikesh@example.com" });
+await client.apiKeys.create({ userId: "user_id", name: "Local Dev Key" });
+await client.providerCredentials.create({
+  userId: "user_id",
+  provider: "openai",
+  apiKey: "sk-...",
+});
+await client.modelAccess.create({
+  userId: "user_id",
+  provider: "openai",
+  model: "gpt-4o-mini",
+  isEnabled: true,
 });
 ```
 
-The SDK includes TypeScript types, timeout handling, retry handling for transient failures, and SDK error classes.
+See `packages/sdk/README.md` for installation, TypeScript, routing, analytics, provider health, and error-handling examples.
+
+## CLI Usage
+
+The CLI package lives at `packages/cli` and is prepared for the npm package name `@routemind/cli`.
+
+```bash
+npm run build -w @routemind/cli
+node packages/cli/dist/index.js --help
+```
+
+After publishing, the binary name is `routemind`:
+
+```bash
+routemind login
+routemind chat "Help me debug this code"
+routemind health
+routemind analytics
+routemind models
+routemind costs
+routemind circuit-breakers
+routemind config
+```
+
+Global options:
+
+```bash
+routemind --api-key rm_test_... --base-url http://localhost:3000 health
+routemind --json analytics
+```
+
+Chat options:
+
+```bash
+routemind chat "debug this code" \
+  --strategy quality_first \
+  --routing-mode llm_assisted \
+  --max-cost-tier medium \
+  --max-estimated-cost-usd 0.02
+```
+
+`routemind login` stores local config at `~/.routemind/config.json` with `apiKey` and `baseUrl`. Human-readable output masks API keys.
+
+Streaming from the CLI:
+
+```bash
+routemind chat "Explain this stack trace" --stream
+```
+
+See `packages/cli/README.md` for command examples and JSON mode details.
 
 ## Provider Configuration
 
@@ -296,6 +859,323 @@ Example response:
 }
 ```
 
+## AI Planner
+
+RouteMind planning is a layer above routing. Routing answers: "which model/provider should be eligible and preferred?" Planning answers: "how should this request be executed?"
+
+The request can opt into planner behavior:
+
+```json
+{
+  "model": "auto",
+  "messages": [{ "role": "user", "content": "Analyze this architecture tradeoff" }],
+  "routing": {
+    "mode": "llm_assisted",
+    "strategy": "balanced",
+    "executionPlan": "auto"
+  }
+}
+```
+
+Supported `routing.executionPlan` values:
+
+- `auto`: RouteMind chooses an executable plan. In the MVP this resolves to `single_model`.
+- `single_model`: Normal routing, then execute one best model.
+- `quality_first`: Execute the strongest valid available model.
+- `cheap_first`: Planned interface for trying a cheap/fast draft before escalation. Not executable yet.
+- `summarize_then_reason`: Planned interface for compressing large context before reasoning. Not executable yet.
+
+Planner recommendations are validated before execution. RouteMind still enforces enabled providers, enabled models, blocked providers/models, max cost tier, health status, circuit breaker state, budgets, and quotas. If an executable planner recommendation is invalid, RouteMind falls back to normal routing.
+
+Every planned request includes response metadata and writes an `ExecutionPlanLog`:
+
+```json
+{
+  "executionPlan": {
+    "planType": "quality_first",
+    "steps": [
+      {
+        "step": 1,
+        "purpose": "answer_user_request",
+        "provider": "openai",
+        "model": "gpt-4o",
+        "reason": "Highest quality available model after routing constraints."
+      }
+    ],
+    "estimatedCostUsd": 0.01,
+    "actualCostUsd": 0.008,
+    "confidence": 0.9,
+    "reason": "Prioritize answer quality over cost and latency.",
+    "executed": true
+  }
+}
+```
+
+Future planner work will make `cheap_first` and `summarize_then_reason` executable with model-to-model intermediate outputs and quality checks.
+
+## Analytics APIs
+
+RouteMind exposes backend-only analytics APIs for a future dashboard. They read from existing gateway logs: `RequestLog`, `ProviderAttemptLog`, `RouterDecisionLog`, `ExecutionPlanLog`, and provider health snapshots.
+
+All analytics endpoints accept optional filters:
+
+- `userId`
+- `from`: ISO datetime
+- `to`: ISO datetime
+
+Endpoints:
+
+```bash
+curl "http://localhost:3000/v1/analytics/summary?from=2026-07-07T00:00:00.000Z"
+curl http://localhost:3000/v1/analytics/models
+curl http://localhost:3000/v1/analytics/providers
+curl http://localhost:3000/v1/analytics/errors
+curl http://localhost:3000/v1/analytics/costs
+curl http://localhost:3000/v1/analytics/latency
+```
+
+Summary response:
+
+```json
+{
+  "range": {
+    "from": "2026-07-07T00:00:00.000Z",
+    "to": "2026-07-07T23:59:59.999Z"
+  },
+  "requests": {
+    "total": 1000,
+    "success": 940,
+    "failed": 60,
+    "successRate": 0.94
+  },
+  "cost": {
+    "totalSpendUsd": 12.48,
+    "averageCostPerRequest": 0.01248
+  },
+  "tokens": {
+    "input": 120000,
+    "output": 45000,
+    "total": 165000
+  },
+  "latency": {
+    "averageMs": 1850,
+    "p95Ms": 5200
+  },
+  "routing": {
+    "fallbackUsed": 74,
+    "llmAssisted": 800,
+    "scoreBased": 120,
+    "ruleBased": 80
+  },
+  "guardrails": {
+    "budgetBlocked": 12,
+    "quotaBlocked": 8
+  }
+}
+```
+
+Grouped model analytics:
+
+```json
+{
+  "models": [
+    {
+      "model": "gpt-4o",
+      "provider": "openai",
+      "requests": 120,
+      "successRate": 0.98,
+      "totalSpendUsd": 3.5,
+      "averageLatencyMs": 2100
+    }
+  ]
+}
+```
+
+Cost analytics groups spend by day:
+
+```json
+{
+  "costs": [
+    {
+      "date": "2026-07-07",
+      "spendUsd": 1.42,
+      "requests": 130
+    }
+  ]
+}
+```
+
+Latency analytics groups by day and provider:
+
+```json
+{
+  "latency": [
+    {
+      "date": "2026-07-07",
+      "provider": "openai",
+      "averageLatencyMs": 1850,
+      "p95LatencyMs": 5200,
+      "requests": 80
+    }
+  ]
+}
+```
+
+## Evaluation Engine
+
+RouteMind includes an evaluation and benchmarking layer so routing can learn from model quality, not only cost, latency, and health. Evaluations let teams define datasets, run provider/model benchmarks, store per-case results, and expose model scores that RouteMind passes into the routing engine.
+
+Scoring modes:
+
+- `exact_match`: model output must exactly equal `expectedOutput`.
+- `contains`: model output must contain `expectedOutput`.
+- `llm_judge`: interface is present for rubric-based judging; the MVP uses a mock judge.
+
+Create a dataset:
+
+```bash
+curl -X POST http://localhost:3000/v1/evaluations/datasets \
+  -H "content-type: application/json" \
+  -d '{
+    "name": "Code debugging",
+    "description": "Checks debugging answer quality",
+    "taskType": "debugging"
+  }'
+```
+
+Add a case:
+
+```bash
+curl -X POST http://localhost:3000/v1/evaluations/datasets/eval_dataset_1/cases \
+  -H "content-type: application/json" \
+  -d '{
+    "inputMessagesJson": [
+      { "role": "user", "content": "Bug: undefined is not a function" }
+    ],
+    "expectedOutput": "undefined",
+    "gradingRubric": "contains",
+    "metadataJson": { "difficulty": "easy" }
+  }'
+```
+
+Create and start a run:
+
+```bash
+curl -X POST http://localhost:3000/v1/evaluations/runs \
+  -H "content-type: application/json" \
+  -d '{
+    "datasetId": "eval_dataset_1",
+    "provider": "openai",
+    "model": "gpt-4o"
+  }'
+
+curl -X POST http://localhost:3000/v1/evaluations/runs/eval_run_1/start
+```
+
+Run response:
+
+```json
+{
+  "run": {
+    "id": "eval_run_1",
+    "datasetId": "eval_dataset_1",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "status": "completed",
+    "totalCases": 10,
+    "passedCases": 8,
+    "averageScore": 0.82
+  },
+  "results": []
+}
+```
+
+List dashboard-friendly score aggregates:
+
+```bash
+curl http://localhost:3000/v1/evaluations/scores
+```
+
+Completed evaluation scores are passed into `decideLLMRoute` through `evaluationScores`, allowing the router or Router LLM to prefer models that benchmark well for real tasks.
+
+The developer seed command creates sample datasets for summarization, code debugging, JSON extraction, and simple chat:
+
+```bash
+npm run seed:dev
+```
+
+## Resilience Layer
+
+RouteMind wraps provider execution in a production resilience layer after routing selects candidates.
+
+Retry behavior:
+
+- Retries transient provider failures only: timeout, HTTP 429, HTTP 500, HTTP 502, HTTP 503, HTTP 504, and network/provider unavailable errors.
+- Does not retry auth errors, invalid provider keys, bad requests, unsupported models, validation errors, budget failures, or quota failures.
+- Defaults to `maxRetries: 2`, `baseDelayMs: 300`, `maxDelayMs: 3000`, exponential backoff, and jitter.
+
+Fallback behavior:
+
+- The primary routed candidate is attempted first.
+- If the primary still fails after allowed retries, RouteMind attempts the remaining `route.candidates` in routing order.
+- Fallback candidates still respect enabled providers, enabled models, blocked providers/models, max cost tier, provider health, request cost limits, budgets, quotas, and circuit breaker state.
+- Open circuits are skipped before provider execution.
+
+Circuit breaker rules:
+
+- Circuits are tracked per provider and model.
+- Default state is `CLOSED`.
+- Five failures within five minutes moves a circuit to `OPEN`.
+- `OPEN` circuits stay open for two minutes.
+- After two minutes they move to `HALF_OPEN`.
+- A successful half-open request closes the circuit.
+- A failed half-open request opens it again.
+
+Resilience APIs:
+
+```bash
+curl http://localhost:3000/v1/resilience/circuit-breakers
+curl http://localhost:3000/v1/resilience/circuit-breakers/openai
+curl -X POST http://localhost:3000/v1/resilience/circuit-breakers/openai/gpt-4o-mini/reset
+curl "http://localhost:3000/v1/resilience/provider-attempts?provider=openai&status=failed&limit=50"
+```
+
+Successful responses include the same metadata when retries or fallback were used:
+
+```json
+{
+  "id": "chatcmpl_mock_...",
+  "object": "chat.completion",
+  "model": "claude-3-5-sonnet",
+  "resilience": {
+    "primaryProvider": "openai",
+    "primaryModel": "gpt-4o-mini",
+    "finalProvider": "anthropic",
+    "finalModel": "claude-3-5-sonnet",
+    "fallbackUsed": true,
+    "circuitBreakerTriggered": false,
+    "attempts": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "attemptNumber": 1,
+        "status": "failed",
+        "latencyMs": 301,
+        "errorType": "TIMEOUT",
+        "errorMessage": "OpenAI timed out."
+      },
+      {
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "attemptNumber": 1,
+        "status": "success",
+        "latencyMs": 642
+      }
+    ]
+  }
+}
+```
+
 Routing now considers only models enabled for the authenticated user:
 
 1. Identify the user from `x-api-key`.
@@ -336,7 +1216,8 @@ packages/
   observability/Telemetry contracts
   policy-engine/Policy evaluation contracts
   shared/       Shared utilities, schemas, and types
-  sdk/          Future public SDK contracts
+  sdk/          Public TypeScript SDK package
+  cli/          Developer CLI package
 docs/           Architecture, system design, and contribution docs
 docker/         Container build files
 ```
@@ -350,6 +1231,11 @@ Implemented:
 - Database-backed API key authentication using hashed RouteMind API keys.
 - Request validation with Zod.
 - Keyword-based routing engine for automatic provider/model selection.
+- AI Planner with `single_model` and `quality_first` execution strategies plus future-plan metadata.
+- Backend analytics APIs for summary, model, provider, error, cost, and latency dashboards.
+- Production-ready TypeScript SDK package prepared for npm publishing.
+- Developer CLI for login, chat, health, analytics, models, costs, and circuit breaker inspection.
+- Evaluation datasets, benchmark runs, model quality scores, and routing score integration.
 - Provider factory with mock and live modes.
 - Mock and live OpenAI, Anthropic, Gemini, and Groq providers.
 - Basic cost estimation.
@@ -363,7 +1249,7 @@ Implemented:
 
 Deferred:
 
-- Streaming provider responses.
+- Native live-provider streaming beyond simulated chunks.
 - Production routing strategies beyond the MVP keyword router.
 - Fine-grained organization/team authorization.
 - Dashboard application.

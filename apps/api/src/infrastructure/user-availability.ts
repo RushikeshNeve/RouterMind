@@ -31,6 +31,38 @@ export class PrismaUserAvailabilityStore implements UserAvailabilityStore {
       return createDefaultAvailability(this.config);
     }
 
+    if (user.workspaceId) {
+      const [credentials, modelAccess] = await Promise.all([
+        this.prisma.$queryRaw<{ readonly provider: string; readonly encryptedApiKey: string }[]>`
+          SELECT "provider", "encryptedApiKey"
+          FROM "ProviderCredential"
+          WHERE "workspaceId" = ${user.workspaceId}
+            AND "isEnabled" = true
+        `,
+        this.prisma.$queryRaw<{ readonly provider: string; readonly model: string }[]>`
+          SELECT "provider", "model"
+          FROM "UserModelAccess"
+          WHERE "workspaceId" = ${user.workspaceId}
+            AND "isEnabled" = true
+        `,
+      ]);
+      const enabledProviders = credentials.map((credential) => credential.provider);
+      const providerApiKeys = Object.fromEntries(
+        credentials.map((credential) => [
+          credential.provider,
+          decryptCredential(credential.encryptedApiKey, this.config.CREDENTIAL_ENCRYPTION_KEY),
+        ]),
+      ) as UserProviderAvailability["providerApiKeys"];
+
+      return {
+        enabledProviders,
+        providerApiKeys,
+        enabledModels: modelAccess
+          .filter((access) => enabledProviders.includes(access.provider))
+          .map((access) => access.model),
+      };
+    }
+
     const [credentials, modelAccess] = await Promise.all([
       this.prisma.providerCredential.findMany({
         where: {
