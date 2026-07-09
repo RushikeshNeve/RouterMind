@@ -21,7 +21,7 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/RushikeshNeve/RouterMind.git",
+    "url": "git+https://github.com/RushikeshNeve/RouterMind.git",
     "directory": "packages/sdk"
   },
   "keywords": [

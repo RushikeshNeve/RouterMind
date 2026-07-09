@@ -1,0 +1,57 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">RouteMind Icon</title>
+  <desc id="desc">Navy and blue routing arrow icon with speed lines and circular route arc.</desc>
+  <defs>
+    <linearGradient id="blueGrad" x1="170" y1="0" x2="720" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1F6BFF"/>
+      <stop offset="1" stop-color="#004EEB"/>
+    </linearGradient>
+    <linearGradient id="navyGrad" x1="400" y1="250" x2="830" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#061B49"/>
+      <stop offset="1" stop-color="#001B52"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#FFFFFF"/>
+
+  <!-- Circular route arc -->
+  <path d="M399 333
+           A290 290 0 1 1 399 691"
+        fill="none"
+        stroke="#061B49"
+        stroke-width="58"
+        stroke-linecap="butt"/>
+
+  <!-- Bright blue top speed line -->
+  <path d="M300 425 H735"
+        fill="none"
+        stroke="url(#blueGrad)"
+        stroke-width="28"
+        stroke-linecap="round"/>
+
+  <!-- Bright blue middle speed line -->
+  <path d="M215 505 H395"
+        fill="none"
+        stroke="#0B5FFF"
+        stroke-width="28"
+        stroke-linecap="round"/>
+
+  <!-- Navy bottom speed line -->
+  <path d="M102 580 H166
+           M218 580 H512"
+        fill="none"
+        stroke="#061B49"
+        stroke-width="24"
+        stroke-linecap="round"/>
+
+  <!-- Paper-plane / routing arrow -->
+  <path d="M460 507
+           L755 420
+           C775 414 789 437 775 452
+           L594 636
+           C582 649 558 638 564 620
+           L609 514
+           L460 532
+           C440 535 437 514 460 507Z"
+        fill="url(#navyGrad)"/>
+</svg>

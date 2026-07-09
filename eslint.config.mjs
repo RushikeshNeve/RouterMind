@@ -21,7 +21,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["*.ts", "apps/dashboard/tailwind.config.ts"],
+          allowDefaultProject: ["*.ts", "apps/dashboard/tailwind.config.ts", "apps/website/tailwind.config.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
       },
