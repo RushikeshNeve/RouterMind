@@ -10,6 +10,7 @@
     "db:migrate": "npx --yes --package dotenv-cli@8.0.0 --package prisma@6.19.3 dotenv -e ../../.env -- prisma migrate dev --schema prisma/schema.prisma --skip-generate",
     "dev": "tsx watch src/server.ts",
     "prisma:generate": "npx --yes --package dotenv-cli@8.0.0 --package prisma@6.19.3 dotenv -e ../../.env -- prisma generate --schema prisma/schema.prisma",
+    "backfill:tenancy": "npx --yes tsx@4.20.6 src/scripts/backfill-tenancy.ts",
     "seed:dev": "npx --yes tsx@4.20.6 src/scripts/seed-dev.ts",
     "start": "node dist/server.js"
   },
