@@ -156,6 +156,7 @@ model User {
   id                  String               @id @default(cuid())
   name                String
   email               String               @unique
+  principalId         String?              @unique
   createdAt           DateTime             @default(now())
   apiKeys             ApiKey[]
   providerCredentials ProviderCredential[]
@@ -163,6 +164,20 @@ model User {
   budgets             UserBudget[]
   quotas                UsageQuota[]
   workspaceMembers      WorkspaceMember[]
+  principal           Principal?           @relation(fields: [principalId], references: [id], onDelete: SetNull)
+  serviceAccounts     ServiceAccount[]
+}
+
+model ServiceAccount {
+  id              String    @id @default(cuid())
+  principalId     String    @unique
+  createdByUserId String
+  description     String?
+  createdAt       DateTime  @default(now())
+  principal       Principal @relation(fields: [principalId], references: [id], onDelete: Cascade)
+  createdByUser   User      @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([createdByUserId])
 }
 
 model ApiKey {
@@ -170,14 +185,17 @@ model ApiKey {
   keyHash     String     @unique
   userId      String
   workspaceId String?
+  principalId String?
   name        String
   createdAt   DateTime   @default(now())
   isActive    Boolean    @default(true)
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  principal   Principal? @relation(fields: [principalId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([workspaceId])
+  @@index([principalId])
 }
 
 model ProviderCredential {
@@ -393,11 +411,14 @@ model Organization {
 }
 
 model Principal {
-  id          String       @id @default(cuid())
-  type        String
-  displayName String
-  createdAt   DateTime     @default(now())
-  memberships Membership[]
+  id             String          @id @default(cuid())
+  type           String
+  displayName    String
+  createdAt      DateTime        @default(now())
+  memberships    Membership[]
+  users          User[]
+  serviceAccount ServiceAccount?
+  apiKeys        ApiKey[]
 }
 
 model Workspace {
