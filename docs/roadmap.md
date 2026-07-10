@@ -1,0 +1,169 @@
+# RouteMind: Project → Product
+
+### A phase-wise plan combining engineering, pricing, and go-to-market — July 2026
+
+This plan ties together the three prior conversations: the architecture review, the v2.0/v3.0 technical roadmap, and the market positioning research. Nothing here contradicts those documents — this is the sequencing layer that says _when_ each piece happens and _why that order_, with engineering, monetization, and trust-building treated as one track instead of three separate workstreams.
+
+---
+
+## The honest starting position
+
+**What you have**: a technically sound single-tenant LLM gateway with a genuinely differentiated routing engine and prompt firewall.
+
+**What you don't have yet**: anyone who can pay you, anyone whose production traffic depends on you, and a reason a stranger would pick you over Portkey, LiteLLM, or OpenRouter without you explaining it to them personally.
+
+**What "product" means concretely**: a stranger can discover RouteMind, understand what it's for in one sentence, sign up, hit their first budget/RBAC/routing constraint, pay for it, and trust it enough to route real traffic — all without talking to you. Every phase below exists to make one more piece of that sentence true.
+
+---
+
+## Phase 0 — Foundation Hardening
+
+**Theme: make the thing you already built trustworthy for more than one tenant**
+**Timeframe: ~6–8 weeks | Engineering-heavy, no GTM yet**
+
+This is the tenancy/RBAC/policy-engine work from the architecture review, unchanged — it's the load-bearing wall everything else stands on, so it goes first regardless of which USP you eventually lead with.
+
+**Ship:**
+
+- `Organization → Workspace → Membership → Principal` schema migration
+- RBAC (Owner/Admin/Developer/Viewer)
+- Service accounts as first-class principals
+- BYO Router Model (customer-owned routing credentials, resolution order: request → API key → workspace → org → platform default)
+- Declarative policy engine (budgets + model restrictions as rows, not conditionals)
+- Audit log
+
+**Explicitly don't do yet:** dashboard polish, marketing site, pricing page, MCP gateway, observability stack. All of it is wasted if the schema underneath changes shape.
+
+**Exit criteria:** you can create two separate fake companies in your own dev environment, each with two workspaces, different roles, different router-model credentials, and prove one workspace's admin cannot see or spend the other's budget. If you can't demo that convincingly to yourself, you're not done.
+
+**Why this order:** every later phase — billing, the BYO-Everything USP, enterprise trust — is unbuildable without this. It's also the least visible, least exciting phase, which is exactly why it has to be forced first, before the temptation to build visible features takes over.
+
+---
+
+## Phase 1 — Productization
+
+**Theme: turn a feature set into something a stranger can buy**
+**Timeframe: ~6–8 weeks | Engineering + first business decisions**
+
+This is where the pricing model from our earlier conversation becomes real, and where the "transparent, predictable pricing" USP either becomes true or stays a slogan.
+
+**Ship:**
+
+- `Plan`, `Subscription`, `UsageSummary` schema; Stripe Billing integration (subscriptions + metered overage)
+- Plan-gated feature flags evaluated through the same policy-engine contract as everything else (not scattered `if` checks)
+- Self-serve signup flow: org creation → default workspace → first API key, with zero manual steps from you
+- Model discovery/sync (Proposed Feature 4) — this directly reduces time-to-first-successful-request, which matters enormously for self-serve conversion
+- Workspace/API-key-scoped dashboard (falls out cheaply now that RBAC exists)
+- Public docs site + pricing page that states real numbers, not "contact sales" for every tier
+
+**Recommended plan structure** (from the pricing conversation, now made concrete):
+
+- **Free**: 1 org, 1 workspace, rule/score-based routing, 10k requests/month — pure adoption
+- **Pro** (flat monthly): multi-workspace, BYO router model, prompt firewall, basic RBAC
+- **Team**: service accounts, policy engine, audit log, scoped dashboards
+- **Enterprise**: custom — SSO, dedicated infra, compliance
+
+**Exit criteria:** a person who has never spoken to you can sign up, hit the Free tier's request limit, see a clear upgrade prompt, and pay with a credit card, end to end, with no manual intervention.
+
+**Why this order:** you cannot validate the BYO-Everything or transparent-pricing USPs with real customers until people can actually pay you. Building more differentiated features before this is optimizing a product nobody can buy yet.
+
+---
+
+## Phase 2 — Trust & Differentiation
+
+**Theme: make the USPs from the market research real and provable, not aspirational**
+**Timeframe: ~8–10 weeks | Engineering + first design partners**
+
+This is where you stop being "another gateway" and start being _the_ gateway with a specific, defensible claim. Everything here maps directly to USP 1 (BYO Everything) and USP 3 (transparent pricing) from the market research.
+
+**Ship:**
+
+- Harden BYO Router Model: explicit, surfaced fallback behavior (`routemind.routing.reason` in every response) so degraded routing is never silent
+- Data retention / prompt-logging controls, configurable per workspace — this is both a trust feature and table stakes for your next regulated-industry conversation
+- Rate limiting distinct from budgets (protects you, not just the customer)
+- A genuinely honest pricing page: no "recorded logs" ambiguity, no per-service licensing surprises — this is the direct competitive jab at Portkey and Kong's most-criticized pain point
+- 3–5 design partners, ideally teams who've been burned by a Portkey invoice or a Kong contract — recruit through the exact language of USP 1/USP 3, not generic outreach
+
+**Business/GTM work starts here, not before:**
+
+- One-page positioning doc (the statement from the market research) turned into an actual landing page
+- Case study or two from design partners, focused on the "predictable bill" and "we never see your keys" claims specifically — proof, not adjectives
+- Start watching Bifrost's governance roadmap on a monthly cadence; that's the one competitor whose trajectory could occupy this same seat before you
+
+**Exit criteria:** you can point to a real (even if small) customer paying real money, on a plan whose price they predicted correctly before the invoice arrived, using BYO router credentials — i.e., every clause in your positioning statement is demonstrably true for at least one real workspace, not just true in the codebase.
+
+**Why this order:** USPs are marketing claims until someone outside your team relies on them. Phase 2 is the phase where "differentiator" changes from a slide in a review doc to a thing a paying customer would vouch for.
+
+---
+
+## Phase 3 — Scale & Observability
+
+**Theme: survive real production traffic without you personally watching it**
+**Timeframe: ~8–10 weeks | Infrastructure-heavy**
+
+This is the v3.0 infrastructure maturity work — deliberately _after_ Phase 2, not before, because scaling infrastructure nobody is using yet is wasted engineering. You earn the right to build this phase by having Phase 2's design partners generate real load.
+
+**Ship:**
+
+- Logical control-plane/data-plane separation (split connection pools, add read replica) — physical separation only if traffic genuinely demands it
+- OpenTelemetry + Prometheus/Grafana, with routing as its own span
+- Langfuse integration, gated by the same per-workspace data-retention controls from Phase 2 (don't undercut your own trust story)
+- On-call basics: alerting on error rate, latency, budget-breach, circuit-breaker trips — this is the unglamorous work that actually earns "production-grade"
+
+**Exit criteria:** a design partner's traffic spikes 10x for a day and you find out from a Grafana dashboard, not from their support email.
+
+---
+
+## Phase 4 — Platform Expansion
+
+**Theme: earn the right to more surface area**
+**Timeframe: ongoing, feature-by-feature | Only after Phase 3 is stable**
+
+This is Proposed Feature 9, deliberately deprioritized until now, and deliberately selective rather than "build all six." Per the earlier roadmap: shadow routing and prompt versioning first, because shadow routing is a direct extension of the BYO-router trust story (customers can validate a new router model against real traffic without risking cost or quality), and versioning is the prerequisite everything else in this bucket needs.
+
+**Ship (in this order):**
+
+1. Prompt versioning (prerequisite for the rest)
+2. Shadow routing (extends USP 1 — "test a routing change with your own credentials, at your own risk tolerance, with zero blast radius")
+3. MCP gateway — only now, once it's clear the market has fully standardized on it as table stakes (it's trending that way per the research, but wasn't worth building shallow in Phase 0–2)
+4. Prompt playground / model comparison — nice-to-have, build only if design partners specifically ask
+5. Prompt library / evaluations — lowest priority of the six; revisit only with clear demand signal
+
+**Exit criteria:** each shipped feature has at least one design partner who requested it by name before you built it — this phase is the one most at risk of feature-bloat for its own sake, so demand-gating matters more here than anywhere else in the plan.
+
+---
+
+## Phase 5 — Enterprise Readiness
+
+**Theme: the features that unlock the deals you can't close today**
+**Timeframe: as revenue and demand justify it — this is a "when triggered," not "by date," phase**
+
+**Trigger condition:** you have a real Enterprise-tier prospect asking for these specifically. Building them speculatively means competing with Kong/TrueFoundry's sales-led motion on their terms, which you can't win pre-revenue.
+
+**Ship (only when triggered):**
+
+- SSO/SAML for the dashboard
+- SOC2/compliance certification process (this is a 6+ month organizational commitment, not a sprint — start the process the moment you have a prospect who needs it, since the clock runs in parallel with sales)
+- Dedicated/VPC/self-hosted deployment options
+- Custom SLAs and contract billing (vs. self-serve Stripe)
+
+---
+
+## The plan as a single picture
+
+| Phase                       | Question it answers                                 | Depends on                           | Primary risk if skipped or reordered                                                                           |
+| --------------------------- | --------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| 0 — Foundation              | Can two tenants safely share this system?           | Nothing (start here)                 | Every later phase requires re-doing schema work                                                                |
+| 1 — Productization          | Can a stranger pay you without talking to you?      | Phase 0                              | USPs stay theoretical; no real usage data to build on                                                          |
+| 2 — Trust & Differentiation | Is your USP actually true for a real customer?      | Phase 1                              | You compete on features instead of your one real edge; Bifrost or another entrant claims the positioning first |
+| 3 — Scale & Observability   | Does it survive traffic you don't personally watch? | Phase 2 (needs real load to justify) | Wasted engineering on infra for traffic that doesn't exist yet                                                 |
+| 4 — Platform Expansion      | Does the platform grow with real demand?            | Phase 3                              | Feature-bloat without customers who asked for it                                                               |
+| 5 — Enterprise Readiness    | Can you close the deals that need this?             | A real trigger event                 | Months of compliance/SSO work with no prospect waiting on it                                                   |
+
+---
+
+## How I'd actually think about this if it were mine
+
+The single biggest risk to this plan isn't any individual phase — it's the pull to jump to Phase 4 (the fun, differentiated AI-platform features) before Phase 0–1 are actually done, because that's the part that feels like "real product work." Almost every technically strong solo/small-team project I'd compare this to fails at exactly that transition: the founder-engineer keeps making the core more sophisticated because that's where the skill and interest is, while the boring productization work (billing, self-serve onboarding, a pricing page that doesn't say "contact sales") — the part that actually makes it a _product_ — keeps getting pushed to "next sprint."
+
+Given that RouteMind is currently a portfolio/side project rather than a funded company, I'd also flag a sequencing question worth deciding explicitly rather than by default: are you building this toward becoming an actual company with paying customers, or is the primary goal a demonstrably strong AI-infra portfolio piece for the interview process you mentioned? Both are legitimate goals, but they change the plan — if it's the latter, Phase 0 plus a strong Phase 2 (real design partners, even 1–2 unpaid ones, plus honest metrics) is probably enough depth to be compelling in an interview, and Phases 3–5 are lower-priority polish. If it's the former, Phase 1's billing and self-serve work can't be skipped or softened, because that's the phase that turns "impressive project" into "business."

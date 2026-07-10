@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Read(**)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(npm install *)",
+      "Bash(npx prisma migrate deploy*)",
+      "Bash(docker *)"
+    ],
+    "deny": [
+      "Read(./.env*)",
+      "Read(./**/secrets/**)",
+      "Read(./**/*credentials*)",
+      "Bash(rm -rf:*)",
+      "Bash(curl:*)",
+      "Bash(git push --force*)"
+    ]
+  },
+  "defaultMode": "manual",
+  "autoMemoryEnabled": true
+}
