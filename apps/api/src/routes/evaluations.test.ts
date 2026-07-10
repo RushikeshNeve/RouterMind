@@ -13,6 +13,7 @@ const testConfig: ApiConfig = {
   DATABASE_URL: "postgresql://routemind:routemind@localhost:5432/routemind?schema=public",
   DEV_API_KEY: "dev-key",
   CREDENTIAL_ENCRYPTION_KEY: "development-credential-key-change-me",
+  SESSION_SECRET: "development-session-secret-change-me",
   LOG_LEVEL: "silent",
   NODE_ENV: "test",
   PORT: 3000,

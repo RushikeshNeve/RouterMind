@@ -8,6 +8,7 @@
     "incremental": true,
     "isolatedModules": true,
     "jsx": "preserve",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,

@@ -9,6 +9,7 @@ const environmentSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   CORS_ORIGIN: z.string().default("*"),
   CREDENTIAL_ENCRYPTION_KEY: z.string().min(16).default("development-credential-key-change-me"),
+  DASHBOARD_URL: z.string().url().default("http://localhost:3002"),
   DATABASE_URL: z.string().url(),
   DEV_API_KEY: z.string().min(1).default("dev-key"),
   GEMINI_API_KEY: z.string().optional(),
@@ -27,11 +28,13 @@ const environmentSchema = z.object({
   ROUTER_LLM_MAX_TOKENS: z.coerce.number().int().positive().default(300),
   ROUTER_LLM_MODEL: z.string().min(1).default("gpt-4o-mini"),
   REDIS_URL: z.string().url(),
+  SESSION_SECRET: z.string().min(16).default("development-session-secret-change-me"),
 });
 
 type ResolvedApiConfig = z.infer<typeof environmentSchema>;
 type HardeningConfigKeys =
   | "CORS_ORIGIN"
+  | "DASHBOARD_URL"
   | "RATE_LIMIT_MAX_REQUESTS"
   | "RATE_LIMIT_WINDOW_SECONDS"
   | "REQUEST_BODY_LIMIT_BYTES"
@@ -54,6 +57,9 @@ function validateProductionConfig(config: ApiConfig): void {
   const missing: string[] = [];
   if (config.CREDENTIAL_ENCRYPTION_KEY === "development-credential-key-change-me") {
     missing.push("CREDENTIAL_ENCRYPTION_KEY");
+  }
+  if (config.SESSION_SECRET === "development-session-secret-change-me") {
+    missing.push("SESSION_SECRET");
   }
   if (config.DEV_API_KEY === "dev-key") {
     missing.push("DEV_API_KEY");

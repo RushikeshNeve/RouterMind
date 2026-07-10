@@ -1,3 +1,4 @@
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import { NoopTracer, type Tracer } from "@routemind/observability";
@@ -85,8 +86,10 @@ import { registerModelRoutes } from "./routes/models.js";
 import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerProviderHealthRoutes } from "./routes/provider-health.js";
 import { registerResilienceRoutes } from "./routes/resilience.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
+import { ConsoleEmailSender, type EmailSender } from "./infrastructure/email-sender.js";
 import { toSafeErrorResponse } from "./security/errors.js";
 
 export interface BuildAppOptions {
@@ -104,6 +107,7 @@ export interface BuildAppOptions {
   promptFirewallService?: PromptFirewallService;
   workspaceService?: WorkspaceService;
   prisma?: PrismaClient;
+  emailSender?: EmailSender;
   analyticsService?: AnalyticsService;
   readinessService?: ReadinessService;
   tracer?: Tracer;
@@ -155,7 +159,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(helmet);
   await app.register(cors, {
     origin: parseCorsOrigin(options.config.CORS_ORIGIN ?? "*"),
+    // Needed so the dashboard's magic-link session cookie is sent/received
+    // cross-origin (dashboard and API run on different ports in dev, and
+    // different top-level domains in production).
+    credentials: true,
   });
+  await app.register(cookie);
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("x-request-id", request.id);
@@ -229,6 +238,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     config: options.config,
     workspaceService,
     prisma,
+  });
+  registerAuthRoutes(app, {
+    config: options.config,
+    prisma,
+    emailSender: options.emailSender ?? new ConsoleEmailSender(),
   });
   registerProviderHealthRoutes(app, providerHealthService);
   registerResilienceRoutes(app, {
