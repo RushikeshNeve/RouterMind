@@ -166,29 +166,31 @@ model User {
 }
 
 model ApiKey {
-  id        String   @id @default(cuid())
-  keyHash   String   @unique
-  userId    String
+  id          String     @id @default(cuid())
+  keyHash     String     @unique
+  userId      String
   workspaceId String?
-  name      String
-  createdAt DateTime @default(now())
-  isActive  Boolean  @default(true)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  createdAt   DateTime   @default(now())
+  isActive    Boolean    @default(true)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([workspaceId])
 }
 
 model ProviderCredential {
-  id              String   @id @default(cuid())
+  id              String     @id @default(cuid())
   userId          String
   workspaceId     String?
   provider        String
   encryptedApiKey String
-  isEnabled       Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isEnabled       Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([userId, provider])
   @@index([userId])
@@ -196,13 +198,14 @@ model ProviderCredential {
 }
 
 model UserModelAccess {
-  id        String  @id @default(cuid())
-  userId    String
+  id          String     @id @default(cuid())
+  userId      String
   workspaceId String?
-  provider  String
-  model     String
-  isEnabled Boolean @default(true)
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String
+  model       String
+  isEnabled   Boolean    @default(true)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([userId, provider, model])
   @@index([userId])
@@ -398,15 +401,18 @@ model Principal {
 }
 
 model Workspace {
-  id             String            @id @default(cuid())
-  name           String
-  slug           String            @unique
-  organizationId String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization?     @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  members        WorkspaceMember[]
-  memberships    Membership[]
+  id                  String               @id @default(cuid())
+  name                String
+  slug                String               @unique
+  organizationId      String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  organization        Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  members             WorkspaceMember[]
+  memberships         Membership[]
+  apiKeys             ApiKey[]
+  providerCredentials ProviderCredential[]
+  modelAccess         UserModelAccess[]
 
   @@index([organizationId])
 }
