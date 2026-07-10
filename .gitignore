@@ -10,3 +10,4 @@ coverage/
 .next/
 *.log
 generated/
+.omc/
