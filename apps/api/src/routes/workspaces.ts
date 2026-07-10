@@ -1,10 +1,15 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import type { ApiConfig } from "../config.js";
+import { writeAuditEvent } from "../infrastructure/audit.js";
 import { ensureSameWorkspace, requirePermission } from "../infrastructure/rbac.js";
-import type { WorkspaceRole, WorkspaceService } from "../infrastructure/workspace-service.js";
+import {
+  PrismaWorkspaceService,
+  type WorkspaceRole,
+  type WorkspaceService,
+} from "../infrastructure/workspace-service.js";
 
 const roleSchema = z.enum(["owner", "admin", "developer", "viewer"]);
 
@@ -52,6 +57,16 @@ export function registerWorkspaceRoutes(
   const workspaceService = dependencies.workspaceService;
   const prisma = dependencies.prisma;
 
+  // If the real Prisma-backed service is in use, scope it to the active
+  // transaction so the mutation and its audit event commit or roll back
+  // together. InMemoryWorkspaceService (tests) has no transaction of its
+  // own to join, so it's used as-is regardless of tx.
+  function scopedWorkspaceService(tx: Prisma.TransactionClient): WorkspaceService {
+    return workspaceService instanceof PrismaWorkspaceService
+      ? new PrismaWorkspaceService(tx)
+      : workspaceService;
+  }
+
   app.post("/v1/workspaces", async (request, reply) => {
     const parsed = workspaceCreateSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -98,7 +113,24 @@ export function registerWorkspaceRoutes(
       if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
         return reply;
       }
-      const workspace = await workspaceService.updateWorkspace(params.data.workspaceId, body.data);
+      const rbacContext = request.rbacContext!;
+      const workspace = await prisma.$transaction(async (tx) => {
+        const updated = await scopedWorkspaceService(tx).updateWorkspace(
+          params.data.workspaceId,
+          body.data,
+        );
+        if (updated) {
+          await writeAuditEvent(tx, {
+            workspaceId: params.data.workspaceId,
+            principalId: rbacContext.principalId,
+            action: "workspace.update",
+            targetType: "Workspace",
+            targetId: params.data.workspaceId,
+            metadata: body.data,
+          });
+        }
+        return updated;
+      });
       if (!workspace) {
         return reply.status(404).send({ error: { message: "Workspace not found." } });
       }
@@ -118,10 +150,22 @@ export function registerWorkspaceRoutes(
       if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
         return reply;
       }
-      const member = await workspaceService.addMember({
-        workspaceId: params.data.workspaceId,
-        userId: body.data.userId,
-        role: body.data.role,
+      const rbacContext = request.rbacContext!;
+      const member = await prisma.$transaction(async (tx) => {
+        const created = await scopedWorkspaceService(tx).addMember({
+          workspaceId: params.data.workspaceId,
+          userId: body.data.userId,
+          role: body.data.role,
+        });
+        await writeAuditEvent(tx, {
+          workspaceId: params.data.workspaceId,
+          principalId: rbacContext.principalId,
+          action: "member.add",
+          targetType: "WorkspaceMember",
+          targetId: created.id,
+          metadata: { userId: body.data.userId, role: body.data.role },
+        });
+        return created;
       });
       return reply.status(201).send({ member: serializeMember(member) });
     },
@@ -161,7 +205,24 @@ export function registerWorkspaceRoutes(
             .send({ error: { message: "Cannot demote the last Owner of a workspace." } });
         }
       }
-      const member = await workspaceService.updateMember(params.data.memberId, body.data.role);
+      const rbacContext = request.rbacContext!;
+      const member = await prisma.$transaction(async (tx) => {
+        const updated = await scopedWorkspaceService(tx).updateMember(
+          params.data.memberId,
+          body.data.role,
+        );
+        if (updated) {
+          await writeAuditEvent(tx, {
+            workspaceId: params.data.workspaceId,
+            principalId: rbacContext.principalId,
+            action: "member.update",
+            targetType: "WorkspaceMember",
+            targetId: params.data.memberId,
+            metadata: { from: existing.role, to: body.data.role },
+          });
+        }
+        return updated;
+      });
       if (!member) {
         return reply.status(404).send({ error: { message: "Workspace member not found." } });
       }
@@ -192,7 +253,21 @@ export function registerWorkspaceRoutes(
             .send({ error: { message: "Cannot remove the last Owner of a workspace." } });
         }
       }
-      const deleted = await workspaceService.removeMember(params.data.memberId);
+      const rbacContext = request.rbacContext!;
+      const deleted = await prisma.$transaction(async (tx) => {
+        const removed = await scopedWorkspaceService(tx).removeMember(params.data.memberId);
+        if (removed) {
+          await writeAuditEvent(tx, {
+            workspaceId: params.data.workspaceId,
+            principalId: rbacContext.principalId,
+            action: "member.remove",
+            targetType: "WorkspaceMember",
+            targetId: params.data.memberId,
+            metadata: { role: existing.role },
+          });
+        }
+        return removed;
+      });
       if (!deleted) {
         return reply.status(404).send({ error: { message: "Workspace member not found." } });
       }
@@ -221,12 +296,24 @@ export function registerWorkspaceRoutes(
           error: { message: "Target user has no Principal yet — run the tenancy backfill first." },
         });
       }
-      const record = await workspaceService.createApiKey({
-        workspaceId: params.data.workspaceId,
-        userId: body.data.userId,
-        principalId: targetUser.principalId,
-        name: body.data.name,
-        nodeEnv: dependencies.config.NODE_ENV,
+      const rbacContext = request.rbacContext!;
+      const record = await prisma.$transaction(async (tx) => {
+        const created = await scopedWorkspaceService(tx).createApiKey({
+          workspaceId: params.data.workspaceId,
+          userId: body.data.userId,
+          principalId: targetUser.principalId!,
+          name: body.data.name,
+          nodeEnv: dependencies.config.NODE_ENV,
+        });
+        await writeAuditEvent(tx, {
+          workspaceId: params.data.workspaceId,
+          principalId: rbacContext.principalId,
+          action: "apikey.create",
+          targetType: "ApiKey",
+          targetId: created.id,
+          metadata: { name: body.data.name, forUserId: body.data.userId },
+        });
+        return created;
       });
       return reply.status(201).send({
         apiKey: record.apiKey,
@@ -234,6 +321,35 @@ export function registerWorkspaceRoutes(
         name: record.name,
         createdAt: record.createdAt.toISOString(),
       });
+    },
+  );
+
+  app.get(
+    "/v1/workspaces/:workspaceId/audit-log",
+    { preHandler: requirePermission(prisma, "audit.read") },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      if (!params.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const events = await prisma.auditEvent.findMany({
+        where: { workspaceId: params.data.workspaceId },
+        orderBy: { createdAt: "desc" },
+      });
+      return {
+        events: events.map((event) => ({
+          id: event.id,
+          principalId: event.principalId,
+          action: event.action,
+          targetType: event.targetType,
+          targetId: event.targetId,
+          metadata: event.metadataJson,
+          createdAt: event.createdAt.toISOString(),
+        })),
+      };
     },
   );
 }

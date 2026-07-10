@@ -1,10 +1,14 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import type { ApiConfig } from "../config.js";
+import { writeAuditEvent } from "../infrastructure/audit.js";
 import { ensureSameWorkspace, requirePermission } from "../infrastructure/rbac.js";
-import type { WorkspaceService } from "../infrastructure/workspace-service.js";
+import {
+  PrismaWorkspaceService,
+  type WorkspaceService,
+} from "../infrastructure/workspace-service.js";
 
 const roleSchema = z.enum(["Owner", "Admin", "Developer", "Viewer"]);
 
@@ -35,6 +39,12 @@ export function registerServiceAccountRoutes(
   const prisma = dependencies.prisma;
   const workspaceService = dependencies.workspaceService;
 
+  function scopedWorkspaceService(tx: Prisma.TransactionClient): WorkspaceService {
+    return workspaceService instanceof PrismaWorkspaceService
+      ? new PrismaWorkspaceService(tx)
+      : workspaceService;
+  }
+
   app.post(
     "/v1/service-accounts",
     { preHandler: requirePermission(prisma, "workspace.manage") },
@@ -54,23 +64,35 @@ export function registerServiceAccountRoutes(
         });
       }
 
-      const principal = await prisma.principal.create({
-        data: { type: "service_account", displayName: body.data.displayName },
-      });
-      const serviceAccount = await prisma.serviceAccount.create({
-        data: {
-          principalId: principal.id,
-          createdByUserId: request.rbacContext!.userId,
-          description: body.data.description,
-        },
-      });
-      await prisma.membership.create({
-        data: {
+      const rbacContext = request.rbacContext!;
+      const { principal, serviceAccount } = await prisma.$transaction(async (tx) => {
+        const createdPrincipal = await tx.principal.create({
+          data: { type: "service_account", displayName: body.data.displayName },
+        });
+        const createdServiceAccount = await tx.serviceAccount.create({
+          data: {
+            principalId: createdPrincipal.id,
+            createdByUserId: rbacContext.userId,
+            description: body.data.description,
+          },
+        });
+        await tx.membership.create({
+          data: {
+            workspaceId: body.data.workspaceId,
+            principalId: createdPrincipal.id,
+            role: body.data.role,
+            roleId: role.id,
+          },
+        });
+        await writeAuditEvent(tx, {
           workspaceId: body.data.workspaceId,
-          principalId: principal.id,
-          role: body.data.role,
-          roleId: role.id,
-        },
+          principalId: rbacContext.principalId,
+          action: "service_account.create",
+          targetType: "ServiceAccount",
+          targetId: createdServiceAccount.id,
+          metadata: { displayName: body.data.displayName, role: body.data.role },
+        });
+        return { principal: createdPrincipal, serviceAccount: createdServiceAccount };
       });
 
       return reply.status(201).send({
@@ -121,14 +143,26 @@ export function registerServiceAccountRoutes(
         });
       }
 
+      const rbacContext = request.rbacContext!;
       // Same issuance path as a user's key (PrismaWorkspaceService.createApiKey /
       // InMemoryWorkspaceService.createApiKey) — only principalId differs.
-      const record = await workspaceService.createApiKey({
-        workspaceId: body.data.workspaceId,
-        userId: serviceAccount.createdByUserId,
-        principalId: serviceAccount.principalId,
-        name: body.data.name,
-        nodeEnv: dependencies.config.NODE_ENV,
+      const record = await prisma.$transaction(async (tx) => {
+        const created = await scopedWorkspaceService(tx).createApiKey({
+          workspaceId: body.data.workspaceId,
+          userId: serviceAccount.createdByUserId,
+          principalId: serviceAccount.principalId,
+          name: body.data.name,
+          nodeEnv: dependencies.config.NODE_ENV,
+        });
+        await writeAuditEvent(tx, {
+          workspaceId: body.data.workspaceId,
+          principalId: rbacContext.principalId,
+          action: "apikey.create",
+          targetType: "ApiKey",
+          targetId: created.id,
+          metadata: { name: body.data.name, forServiceAccountId: serviceAccount.id },
+        });
+        return created;
       });
 
       return reply.status(201).send({

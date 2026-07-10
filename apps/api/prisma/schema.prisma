@@ -419,6 +419,7 @@ model Principal {
   users          User[]
   serviceAccount ServiceAccount?
   apiKeys        ApiKey[]
+  auditEvents    AuditEvent[]
 }
 
 model Workspace {
@@ -434,6 +435,7 @@ model Workspace {
   apiKeys             ApiKey[]
   providerCredentials ProviderCredential[]
   modelAccess         UserModelAccess[]
+  auditEvents         AuditEvent[]
 
   @@index([organizationId])
 }
@@ -490,4 +492,22 @@ model RolePermission {
   @@unique([roleId, permission])
   @@index([roleId])
   @@index([permission])
+}
+
+/// Append-only. No update/delete routes should ever be added for this model.
+model AuditEvent {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  principalId  String
+  action       String
+  targetType   String
+  targetId     String
+  metadataJson Json?
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  principal    Principal @relation(fields: [principalId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId])
+  @@index([principalId])
+  @@index([createdAt])
 }
