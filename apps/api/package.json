@@ -13,6 +13,7 @@
     "backfill:tenancy": "npx --yes tsx@4.20.6 src/scripts/backfill-tenancy.ts",
     "backfill:principal-fk": "npx --yes tsx@4.20.6 src/scripts/backfill-principal-fk.ts",
     "backfill:workspace-fk": "npx --yes tsx@4.20.6 src/scripts/backfill-workspace-fk.ts",
+    "backfill:membership-role": "npx --yes tsx@4.20.6 src/scripts/backfill-membership-role.ts",
     "seed:dev": "npx --yes tsx@4.20.6 src/scripts/seed-dev.ts",
     "seed:rbac": "npx --yes tsx@4.20.6 src/scripts/seed-rbac.ts",
     "start": "node dist/server.js"

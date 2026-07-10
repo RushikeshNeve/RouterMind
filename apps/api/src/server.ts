@@ -32,6 +32,7 @@ const promptFirewallService = new PrismaPromptFirewallService(prisma);
 const workspaceService = new PrismaWorkspaceService(prisma);
 const app = await buildApp({
   config,
+  prisma,
   authenticator,
   onboardingStore: new PrismaOnboardingStore(prisma),
   providerHealthService: new PrismaProviderHealthService(prisma),

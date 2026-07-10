@@ -1,11 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
-import { loadConfig } from "../config.js";
-
-loadConfig();
-const prisma = new PrismaClient();
-
-const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
+export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   Viewer: ["analytics.read"],
   Developer: ["analytics.read", "models.use"],
   Admin: [
@@ -28,7 +23,7 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
 };
 
-async function main(): Promise<void> {
+export async function seedRoles(prisma: PrismaClient): Promise<void> {
   for (const [roleName, permissions] of Object.entries(ROLE_PERMISSIONS)) {
     const role = await prisma.role.upsert({
       where: { name: roleName },
@@ -48,8 +43,14 @@ async function main(): Promise<void> {
   }
 }
 
-try {
-  await main();
-} finally {
-  await prisma.$disconnect();
+if (process.argv[1]?.replace(/\\/g, "/").endsWith("scripts/seed-rbac.ts")) {
+  const { PrismaClient } = await import("@prisma/client");
+  const { loadConfig } = await import("../config.js");
+  loadConfig();
+  const prisma = new PrismaClient();
+  try {
+    await seedRoles(prisma);
+  } finally {
+    await prisma.$disconnect();
+  }
 }

@@ -1,31 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
-import type { ProviderAdapter } from "@routemind/providers";
-import { buildApp } from "../app.js";
-import type { ApiConfig } from "../config.js";
-import { InMemoryAnalyticsService } from "../infrastructure/analytics-service.js";
-import { InMemoryExecutionPlanLogStore } from "../infrastructure/execution-plan-log-store.js";
-import { InMemoryProviderAttemptLogStore } from "../infrastructure/provider-attempt-log-store.js";
-import { InMemoryRateLimiter } from "../infrastructure/rate-limiter.js";
-import { InMemoryRequestLogStore } from "../infrastructure/request-log-store.js";
-import { RetryPolicyService } from "../infrastructure/retry-policy-service.js";
-import { InMemoryRouterDecisionLogStore } from "../infrastructure/router-decision-log-store.js";
-import type { UserAvailabilityStore } from "../infrastructure/user-availability.js";
-import { InMemoryWorkspaceService } from "../infrastructure/workspace-service.js";
-
-const testConfig: ApiConfig = {
-  DATABASE_URL: "postgresql://routemind:routemind@localhost:5432/routemind?schema=public",
-  DEV_API_KEY: "dev-key",
-  CREDENTIAL_ENCRYPTION_KEY: "development-credential-key-change-me",
-  LOG_LEVEL: "silent",
-  NODE_ENV: "test",
-  PORT: 3000,
-  PROVIDER_MODE: "mock",
-  PROVIDER_TIMEOUT_MS: 30_000,
-  ROUTER_LLM_ENABLED: false,
-  ROUTER_LLM_MAX_TOKENS: 300,
-  ROUTER_LLM_MODEL: "gpt-4o-mini",
-  REDIS_URL: "redis://localhost:6379",
-};
+import { PrismaClient } from "@prisma/client";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import {
+  cleanupFixture,
+  createWorkspaceTestApp,
+  seedWorkspaceWithRole,
+  testConfig,
+  type WorkspaceRoleFixture,
+} from "./workspaces-rbac-fixtures.js";
 
 function parse<T>(response: { payload: string }): T {
   return JSON.parse(response.payload) as T;
@@ -33,9 +14,16 @@ function parse<T>(response: { payload: string }): T {
 
 describe("workspace routes", () => {
   const apps: Awaited<ReturnType<typeof createWorkspaceTestApp>>[] = [];
+  const fixturePrisma = new PrismaClient({ datasourceUrl: testConfig.DATABASE_URL });
+  const fixtures: WorkspaceRoleFixture[] = [];
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map(({ app }) => app.close()));
+    await Promise.all(fixtures.splice(0).map((fixture) => cleanupFixture(fixturePrisma, fixture)));
+  });
+
+  afterAll(async () => {
+    await fixturePrisma.$disconnect();
   });
 
   it("creates a workspace and adds a member", async () => {
@@ -48,10 +36,15 @@ describe("workspace routes", () => {
       payload: { name: "Acme AI", ownerUserId: "owner-user" },
     });
     const workspace = parse<{ workspace: { id: string; slug: string } }>(created).workspace;
+
+    const fixture = await seedWorkspaceWithRole(fixturePrisma, "Owner", workspace.id);
+    fixtures.push(fixture);
+
     const member = await context.app.inject({
       method: "POST",
       url: `/v1/workspaces/${workspace.id}/members`,
-      payload: { userId: "dev-user-2", role: "developer", actorUserId: "owner-user" },
+      headers: { "x-api-key": fixture.apiKey },
+      payload: { userId: "dev-user-2", role: "developer" },
     });
 
     expect(created.statusCode).toBe(201);
@@ -73,9 +66,13 @@ describe("workspace routes", () => {
       role: "viewer",
     });
 
+    const fixture = await seedWorkspaceWithRole(fixturePrisma, "Viewer", workspace.id);
+    fixtures.push(fixture);
+
     const response = await context.app.inject({
       method: "POST",
       url: `/v1/workspaces/${workspace.id}/api-keys`,
+      headers: { "x-api-key": fixture.apiKey },
       payload: { userId: "viewer-user", name: "viewer key" },
     });
 
@@ -89,9 +86,14 @@ describe("workspace routes", () => {
       name: "Platform",
       ownerUserId: "owner-user",
     });
+
+    const fixture = await seedWorkspaceWithRole(fixturePrisma, "Owner", workspace.id);
+    fixtures.push(fixture);
+
     const keyResponse = await context.app.inject({
       method: "POST",
       url: `/v1/workspaces/${workspace.id}/api-keys`,
+      headers: { "x-api-key": fixture.apiKey },
       payload: { userId: "owner-user", name: "gateway" },
     });
     const { apiKey } = parse<{ apiKey: string }>(keyResponse);
@@ -187,89 +189,3 @@ describe("workspace routes", () => {
     expect(parse<{ requests: { total: number } }>(response).requests.total).toBe(1);
   });
 });
-
-async function createWorkspaceTestApp(
-  options: {
-    readonly costGuardrailService?: {
-      checkBeforeRequest(input: {
-        userId: string;
-        workspaceId?: string;
-        estimatedCostUsd: number;
-        estimatedTokens: number;
-        maxEstimatedCostUsd?: number;
-      }): Promise<{ allowed: boolean; errorCode?: "BUDGET_EXCEEDED"; message?: string }>;
-      recordUsage(input: {
-        userId: string;
-        workspaceId?: string;
-        actualCostUsd: number;
-        totalTokens: number;
-      }): Promise<void>;
-    };
-  } = {},
-) {
-  const workspaceService = new InMemoryWorkspaceService();
-  const requestLogStore = new InMemoryRequestLogStore();
-  const routerDecisionLogStore = new InMemoryRouterDecisionLogStore();
-  const providerAttemptLogStore = new InMemoryProviderAttemptLogStore();
-  const executionPlanLogStore = new InMemoryExecutionPlanLogStore();
-  const availabilityWorkspaceIds: Array<string | undefined> = [];
-  const availabilityStore: UserAvailabilityStore = {
-    getAvailability: (user) => {
-      availabilityWorkspaceIds.push(user.workspaceId);
-      return Promise.resolve({
-        enabledProviders: ["openai"],
-        enabledModels: ["gpt-4o"],
-        providerApiKeys: {},
-      });
-    },
-  };
-  const provider: ProviderAdapter = {
-    providerName: "openai",
-    supportedModels: ["gpt-4o"],
-    chatCompletion: (request) =>
-      Promise.resolve({
-        id: "workspace-chat",
-        object: "chat.completion",
-        created: 1,
-        model: request.model,
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
-      }),
-  };
-  const analyticsService = new InMemoryAnalyticsService(
-    requestLogStore,
-    routerDecisionLogStore,
-    providerAttemptLogStore,
-    executionPlanLogStore,
-  );
-  const app = await buildApp({
-    config: testConfig,
-    workspaceService,
-    requestLogStore,
-    routerDecisionLogStore,
-    providerAttemptLogStore,
-    executionPlanLogStore,
-    analyticsService,
-    availabilityStore,
-    rateLimiter: new InMemoryRateLimiter(),
-    retryPolicyService: new RetryPolicyService(undefined, undefined, () => Promise.resolve()),
-    providers: new Map([["openai", provider]]),
-    costGuardrailService: options.costGuardrailService ?? {
-      checkBeforeRequest: () => Promise.resolve({ allowed: true }),
-      recordUsage: () => Promise.resolve(),
-    },
-  });
-
-  return {
-    app,
-    workspaceService,
-    requestLogStore,
-    availabilityWorkspaceIds,
-  };
-}

@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import { NoopTracer, type Tracer } from "@routemind/observability";
 import { createProviderRegistry } from "@routemind/providers";
+import { PrismaClient } from "@prisma/client";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { ApiConfig } from "./config.js";
@@ -101,6 +102,7 @@ export interface BuildAppOptions {
   cacheService?: CacheService;
   promptFirewallService?: PromptFirewallService;
   workspaceService?: WorkspaceService;
+  prisma?: PrismaClient;
   analyticsService?: AnalyticsService;
   readinessService?: ReadinessService;
   tracer?: Tracer;
@@ -189,6 +191,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const promptFirewallService =
     options.promptFirewallService ?? new InMemoryPromptFirewallService();
   const workspaceService = options.workspaceService ?? new InMemoryWorkspaceService();
+  const prisma = options.prisma ?? new PrismaClient({ datasourceUrl: options.config.DATABASE_URL });
+  app.addHook("onClose", async () => {
+    if (!options.prisma) {
+      await prisma.$disconnect();
+    }
+  });
   const analyticsService =
     options.analyticsService ??
     (requestLogStore instanceof InMemoryRequestLogStore &&
@@ -214,6 +222,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerWorkspaceRoutes(app, {
     config: options.config,
     workspaceService,
+    prisma,
   });
   registerProviderHealthRoutes(app, providerHealthService);
   registerResilienceRoutes(app, {

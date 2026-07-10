@@ -3,6 +3,19 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { hashApiKey } from "../security/api-key.js";
 
+export interface RbacContext {
+  readonly userId: string;
+  readonly principalId: string;
+  readonly workspaceId: string;
+  readonly roleId: string;
+}
+
+declare module "fastify" {
+  interface FastifyRequest {
+    rbacContext?: RbacContext;
+  }
+}
+
 function extractApiKey(request: FastifyRequest): string | undefined {
   const directApiKey = request.headers["x-api-key"];
   if (typeof directApiKey === "string" && directApiKey.length > 0) {
@@ -29,10 +42,10 @@ async function sendForbidden(reply: FastifyReply): Promise<void> {
 }
 
 /**
- * Not wired into any route yet — this is a standalone, testable preHandler.
- * It resolves the caller's Principal/Workspace/Role directly from ApiKey and
- * Membership, independent of authenticator.ts, so it can be adopted by
- * routes later without requiring changes to the existing auth flow.
+ * Resolves the caller's Principal/Workspace/Role directly from ApiKey and
+ * Membership, independent of authenticator.ts. On success, attaches the
+ * resolved identity to `request.rbacContext` so route handlers can use it
+ * instead of trusting a caller-supplied actorUserId/userId body param.
  */
 export function requirePermission(
   prisma: PrismaClient,
@@ -47,7 +60,7 @@ export function requirePermission(
 
     const keyRecord = await prisma.apiKey.findUnique({
       where: { keyHash: hashApiKey(apiKey) },
-      select: { isActive: true, principalId: true, workspaceId: true },
+      select: { isActive: true, userId: true, principalId: true, workspaceId: true },
     });
 
     if (!keyRecord || !keyRecord.isActive || !keyRecord.principalId || !keyRecord.workspaceId) {
@@ -78,5 +91,12 @@ export function requirePermission(
       await sendForbidden(reply);
       return;
     }
+
+    request.rbacContext = {
+      userId: keyRecord.userId,
+      principalId: keyRecord.principalId,
+      workspaceId: keyRecord.workspaceId,
+      roleId: membership.roleId,
+    };
   };
 }

@@ -1,13 +1,10 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { PrismaClient } from "@prisma/client";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import type { ApiConfig } from "../config.js";
-import {
-  hasWorkspacePermission,
-  type WorkspacePermission,
-  type WorkspaceRole,
-  type WorkspaceService,
-} from "../infrastructure/workspace-service.js";
+import { requirePermission } from "../infrastructure/rbac.js";
+import type { WorkspaceRole, WorkspaceService } from "../infrastructure/workspace-service.js";
 
 const roleSchema = z.enum(["owner", "admin", "developer", "viewer"]);
 
@@ -20,18 +17,15 @@ const workspaceCreateSchema = z.object({
 const workspacePatchSchema = z.object({
   name: z.string().min(1).optional(),
   slug: z.string().min(1).optional(),
-  actorUserId: z.string().min(1).optional(),
 });
 
 const memberCreateSchema = z.object({
   userId: z.string().min(1),
   role: roleSchema,
-  actorUserId: z.string().min(1).optional(),
 });
 
 const memberPatchSchema = z.object({
   role: roleSchema,
-  actorUserId: z.string().min(1).optional(),
 });
 
 const apiKeyCreateSchema = z.object({
@@ -52,9 +46,11 @@ export function registerWorkspaceRoutes(
   dependencies: {
     readonly config: ApiConfig;
     readonly workspaceService: WorkspaceService;
+    readonly prisma: PrismaClient;
   },
 ): void {
   const workspaceService = dependencies.workspaceService;
+  const prisma = dependencies.prisma;
 
   app.post("/v1/workspaces", async (request, reply) => {
     const parsed = workspaceCreateSchema.safeParse(request.body);
@@ -90,54 +86,46 @@ export function registerWorkspaceRoutes(
     return { workspace: serializeWorkspace(workspace) };
   });
 
-  app.patch("/v1/workspaces/:workspaceId", async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    const body = workspacePatchSchema.safeParse(request.body);
-    if (!params.success || !body.success) {
-      return validation(reply);
-    }
-    if (
-      !(await assertPermission(
-        workspaceService,
-        params.data.workspaceId,
-        body.data.actorUserId,
-        "manage_members",
-        reply,
-      ))
-    ) {
-      return reply;
-    }
-    const workspace = await workspaceService.updateWorkspace(params.data.workspaceId, body.data);
-    if (!workspace) {
-      return reply.status(404).send({ error: { message: "Workspace not found." } });
-    }
-    return { workspace: serializeWorkspace(workspace) };
-  });
+  app.patch(
+    "/v1/workspaces/:workspaceId",
+    { preHandler: requirePermission(prisma, "workspace.manage") },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const body = workspacePatchSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const workspace = await workspaceService.updateWorkspace(params.data.workspaceId, body.data);
+      if (!workspace) {
+        return reply.status(404).send({ error: { message: "Workspace not found." } });
+      }
+      return { workspace: serializeWorkspace(workspace) };
+    },
+  );
 
-  app.post("/v1/workspaces/:workspaceId/members", async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    const body = memberCreateSchema.safeParse(request.body);
-    if (!params.success || !body.success) {
-      return validation(reply);
-    }
-    if (
-      !(await assertPermission(
-        workspaceService,
-        params.data.workspaceId,
-        body.data.actorUserId,
-        "manage_members",
-        reply,
-      ))
-    ) {
-      return reply;
-    }
-    const member = await workspaceService.addMember({
-      workspaceId: params.data.workspaceId,
-      userId: body.data.userId,
-      role: body.data.role,
-    });
-    return reply.status(201).send({ member: serializeMember(member) });
-  });
+  app.post(
+    "/v1/workspaces/:workspaceId/members",
+    { preHandler: requirePermission(prisma, "workspace.manage") },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const body = memberCreateSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const member = await workspaceService.addMember({
+        workspaceId: params.data.workspaceId,
+        userId: body.data.userId,
+        role: body.data.role,
+      });
+      return reply.status(201).send({ member: serializeMember(member) });
+    },
+  );
 
   app.get("/v1/workspaces/:workspaceId/members", async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
@@ -149,95 +137,95 @@ export function registerWorkspaceRoutes(
     };
   });
 
-  app.patch("/v1/workspaces/:workspaceId/members/:memberId", async (request, reply) => {
-    const params = memberParamsSchema.safeParse(request.params);
-    const body = memberPatchSchema.safeParse(request.body);
-    if (!params.success || !body.success) {
-      return validation(reply);
-    }
-    if (
-      !(await assertPermission(
-        workspaceService,
-        params.data.workspaceId,
-        body.data.actorUserId,
-        "manage_members",
-        reply,
-      ))
-    ) {
-      return reply;
-    }
-    const member = await workspaceService.updateMember(params.data.memberId, body.data.role);
-    if (!member) {
-      return reply.status(404).send({ error: { message: "Workspace member not found." } });
-    }
-    return { member: serializeMember(member) };
-  });
+  app.patch(
+    "/v1/workspaces/:workspaceId/members/:memberId",
+    { preHandler: requirePermission(prisma, "workspace.manage") },
+    async (request, reply) => {
+      const params = memberParamsSchema.safeParse(request.params);
+      const body = memberPatchSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const existing = await workspaceService.getMemberById(params.data.memberId);
+      if (!existing) {
+        return reply.status(404).send({ error: { message: "Workspace member not found." } });
+      }
+      if (existing.role === "owner" && body.data.role !== "owner") {
+        const ownerCount = await workspaceService.countOwners(params.data.workspaceId);
+        if (ownerCount <= 1) {
+          return reply
+            .status(409)
+            .send({ error: { message: "Cannot demote the last Owner of a workspace." } });
+        }
+      }
+      const member = await workspaceService.updateMember(params.data.memberId, body.data.role);
+      if (!member) {
+        return reply.status(404).send({ error: { message: "Workspace member not found." } });
+      }
+      return { member: serializeMember(member) };
+    },
+  );
 
-  app.delete("/v1/workspaces/:workspaceId/members/:memberId", async (request, reply) => {
-    const params = memberParamsSchema.safeParse(request.params);
-    const query = z.object({ actorUserId: z.string().min(1).optional() }).safeParse(request.query);
-    if (!params.success || !query.success) {
-      return validation(reply);
-    }
-    if (
-      !(await assertPermission(
-        workspaceService,
-        params.data.workspaceId,
-        query.data.actorUserId,
-        "manage_members",
-        reply,
-      ))
-    ) {
-      return reply;
-    }
-    const deleted = await workspaceService.removeMember(params.data.memberId);
-    if (!deleted) {
-      return reply.status(404).send({ error: { message: "Workspace member not found." } });
-    }
-    return { deleted: true };
-  });
+  app.delete(
+    "/v1/workspaces/:workspaceId/members/:memberId",
+    { preHandler: requirePermission(prisma, "workspace.manage") },
+    async (request, reply) => {
+      const params = memberParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const existing = await workspaceService.getMemberById(params.data.memberId);
+      if (!existing) {
+        return reply.status(404).send({ error: { message: "Workspace member not found." } });
+      }
+      if (existing.role === "owner") {
+        const ownerCount = await workspaceService.countOwners(params.data.workspaceId);
+        if (ownerCount <= 1) {
+          return reply
+            .status(409)
+            .send({ error: { message: "Cannot remove the last Owner of a workspace." } });
+        }
+      }
+      const deleted = await workspaceService.removeMember(params.data.memberId);
+      if (!deleted) {
+        return reply.status(404).send({ error: { message: "Workspace member not found." } });
+      }
+      return { deleted: true };
+    },
+  );
 
-  app.post("/v1/workspaces/:workspaceId/api-keys", async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    const body = apiKeyCreateSchema.safeParse(request.body);
-    if (!params.success || !body.success) {
-      return validation(reply);
-    }
-    const member = await workspaceService.getMember(params.data.workspaceId, body.data.userId);
-    if (!hasWorkspacePermission(member?.role, "manage_api_keys")) {
-      return reply.status(403).send({ error: { message: "Role cannot manage API keys." } });
-    }
-    const record = await workspaceService.createApiKey({
-      workspaceId: params.data.workspaceId,
-      userId: body.data.userId,
-      name: body.data.name,
-      nodeEnv: dependencies.config.NODE_ENV,
-    });
-    return reply.status(201).send({
-      apiKey: record.apiKey,
-      workspaceId: record.workspaceId,
-      name: record.name,
-      createdAt: record.createdAt.toISOString(),
-    });
-  });
-}
-
-async function assertPermission(
-  workspaceService: WorkspaceService,
-  workspaceId: string,
-  actorUserId: string | undefined,
-  permission: WorkspacePermission,
-  reply: FastifyReply,
-): Promise<boolean> {
-  if (!actorUserId) {
-    return true;
-  }
-  const member = await workspaceService.getMember(workspaceId, actorUserId);
-  if (!hasWorkspacePermission(member?.role, permission)) {
-    void reply.status(403).send({ error: { message: "Workspace role is not permitted." } });
-    return false;
-  }
-  return true;
+  app.post(
+    "/v1/workspaces/:workspaceId/api-keys",
+    { preHandler: requirePermission(prisma, "apikey.create") },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const body = apiKeyCreateSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const record = await workspaceService.createApiKey({
+        workspaceId: params.data.workspaceId,
+        userId: body.data.userId,
+        name: body.data.name,
+        nodeEnv: dependencies.config.NODE_ENV,
+      });
+      return reply.status(201).send({
+        apiKey: record.apiKey,
+        workspaceId: record.workspaceId,
+        name: record.name,
+        createdAt: record.createdAt.toISOString(),
+      });
+    },
+  );
 }
 
 function serializeWorkspace(workspace: {
@@ -271,4 +259,25 @@ function serializeMember(member: {
 
 function validation(reply: FastifyReply) {
   return reply.status(400).send({ error: { message: "Invalid workspace request." } });
+}
+
+/**
+ * requirePermission only confirms the caller's role grants the permission
+ * within THEIR OWN workspace — it doesn't know which workspace the route
+ * targets. Without this check, a valid API key for workspace A could act
+ * on any workspace B's resources as long as the caller's role in A happens
+ * to carry the required permission.
+ */
+function ensureSameWorkspace(
+  request: FastifyRequest,
+  targetWorkspaceId: string,
+  reply: FastifyReply,
+): boolean {
+  if (request.rbacContext?.workspaceId !== targetWorkspaceId) {
+    void reply
+      .status(403)
+      .send({ error: { message: "API key does not belong to this workspace." } });
+    return false;
+  }
+  return true;
 }

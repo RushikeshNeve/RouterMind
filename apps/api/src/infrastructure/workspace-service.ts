@@ -58,6 +58,8 @@ export interface WorkspaceService {
   updateMember(memberId: string, role: WorkspaceRole): Promise<WorkspaceMemberRecord | undefined>;
   removeMember(memberId: string): Promise<boolean>;
   getMember(workspaceId: string, userId: string): Promise<WorkspaceMemberRecord | undefined>;
+  getMemberById(memberId: string): Promise<WorkspaceMemberRecord | undefined>;
+  countOwners(workspaceId: string): Promise<number>;
   createApiKey(input: {
     readonly workspaceId: string;
     readonly userId: string;
@@ -217,6 +219,17 @@ export class InMemoryWorkspaceService implements WorkspaceService {
     );
   }
 
+  getMemberById(memberId: string): Promise<WorkspaceMemberRecord | undefined> {
+    return Promise.resolve(this.members.find((member) => member.id === memberId));
+  }
+
+  countOwners(workspaceId: string): Promise<number> {
+    return Promise.resolve(
+      this.members.filter((member) => member.workspaceId === workspaceId && member.role === "owner")
+        .length,
+    );
+  }
+
   createApiKey(input: {
     readonly workspaceId: string;
     readonly userId: string;
@@ -358,6 +371,23 @@ export class PrismaWorkspaceService implements WorkspaceService {
       LIMIT 1
     `;
     return row ? normalizeMember(row) : undefined;
+  }
+
+  async getMemberById(memberId: string): Promise<WorkspaceMemberRecord | undefined> {
+    const [row] = await this.prisma.$queryRaw<WorkspaceMemberRecord[]>`
+      SELECT * FROM "WorkspaceMember"
+      WHERE "id" = ${memberId}
+      LIMIT 1
+    `;
+    return row ? normalizeMember(row) : undefined;
+  }
+
+  async countOwners(workspaceId: string): Promise<number> {
+    const [row] = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS count FROM "WorkspaceMember"
+      WHERE "workspaceId" = ${workspaceId} AND "role" = 'owner'
+    `;
+    return Number(row?.count ?? 0);
   }
 
   async createApiKey(input: {
