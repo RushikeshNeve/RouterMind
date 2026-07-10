@@ -5,6 +5,8 @@ import type { ProviderAdapter } from "@routemind/providers";
 import { buildApp } from "../app.js";
 import type { ApiConfig } from "../config.js";
 import { InMemoryAnalyticsService } from "../infrastructure/analytics-service.js";
+import { PrismaApiKeyAuthenticator } from "../infrastructure/authenticator.js";
+import { CostGuardrailService } from "../infrastructure/cost-guardrail-service.js";
 import { InMemoryExecutionPlanLogStore } from "../infrastructure/execution-plan-log-store.js";
 import { InMemoryProviderAttemptLogStore } from "../infrastructure/provider-attempt-log-store.js";
 import { InMemoryRateLimiter } from "../infrastructure/rate-limiter.js";
@@ -48,13 +50,16 @@ export async function seedWorkspaceWithRole(
   prisma: PrismaClient,
   roleName: string,
   workspaceIdOverride?: string,
+  organizationIdOverride?: string,
 ): Promise<WorkspaceRoleFixture> {
   await seedRoles(prisma);
   const role = await prisma.role.findUniqueOrThrow({ where: { name: roleName } });
 
-  const organization = await prisma.organization.create({
-    data: { name: `RBAC Test Org ${randomUUID()}` },
-  });
+  const organization = organizationIdOverride
+    ? await prisma.organization.findUniqueOrThrow({ where: { id: organizationIdOverride } })
+    : await prisma.organization.create({
+        data: { name: `RBAC Test Org ${randomUUID()}` },
+      });
   const user = await prisma.user.create({
     data: { name: `RBAC Test User ${randomUUID()}`, email: `${randomUUID()}@rbac-test.local` },
   });
@@ -199,14 +204,46 @@ export async function createWorkspaceTestApp(
  * of the in-memory one. Needed for tests that issue a key through a route
  * and then use that same key against another requirePermission-gated route
  * in the same test — requirePermission only ever reads real Postgres, so an
- * in-memory-issued key would never resolve there.
+ * in-memory-issued key would never resolve there. Also wires a mock "openai"
+ * provider and the real (Prisma-backed) CostGuardrailService, so tests can
+ * exercise a genuine /v1/chat/completions round trip against real UserBudget
+ * rows rather than asserting budget isolation without ever calling the route
+ * that's supposed to enforce it.
  */
 export async function createPrismaWorkspaceTestApp(prisma: PrismaClient) {
   const workspaceService = new PrismaWorkspaceService(prisma);
+  const authenticator = new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY);
+  const provider: ProviderAdapter = {
+    providerName: "openai",
+    supportedModels: ["gpt-4o"],
+    chatCompletion: (request) =>
+      Promise.resolve({
+        id: "phase0-chat",
+        object: "chat.completion",
+        created: 1,
+        model: request.model,
+        choices: [
+          { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      }),
+  };
+  const availabilityStore: UserAvailabilityStore = {
+    getAvailability: () =>
+      Promise.resolve({
+        enabledProviders: ["openai"],
+        enabledModels: ["gpt-4o"],
+        providerApiKeys: {},
+      }),
+  };
   const app = await buildApp({
     config: testConfig,
     prisma,
     workspaceService,
+    authenticator,
+    providers: new Map([["openai", provider]]),
+    availabilityStore,
+    costGuardrailService: new CostGuardrailService(prisma),
   });
   return { app, workspaceService };
 }
