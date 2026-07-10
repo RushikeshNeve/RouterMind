@@ -94,7 +94,7 @@ describe("workspace routes", () => {
       method: "POST",
       url: `/v1/workspaces/${workspace.id}/api-keys`,
       headers: { "x-api-key": fixture.apiKey },
-      payload: { userId: "owner-user", name: "gateway" },
+      payload: { userId: fixture.userId, name: "gateway" },
     });
     const { apiKey } = parse<{ apiKey: string }>(keyResponse);
 
@@ -138,6 +138,7 @@ describe("workspace routes", () => {
     const { apiKey } = await context.workspaceService.createApiKey({
       workspaceId: workspace.id,
       userId: "owner-user",
+      principalId: "owner-user-principal",
       name: "budget key",
       nodeEnv: "test",
     });

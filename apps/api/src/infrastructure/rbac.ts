@@ -100,3 +100,24 @@ export function requirePermission(
     };
   };
 }
+
+/**
+ * requirePermission only confirms the caller's role grants the permission
+ * within THEIR OWN workspace — it doesn't know which workspace the route
+ * targets. Without this check, a valid API key for workspace A could act
+ * on any workspace B's resources as long as the caller's role in A happens
+ * to carry the required permission.
+ */
+export function ensureSameWorkspace(
+  request: FastifyRequest,
+  targetWorkspaceId: string,
+  reply: FastifyReply,
+): boolean {
+  if (request.rbacContext?.workspaceId !== targetWorkspaceId) {
+    void reply
+      .status(403)
+      .send({ error: { message: "API key does not belong to this workspace." } });
+    return false;
+  }
+  return true;
+}

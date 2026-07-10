@@ -108,7 +108,7 @@ describe("workspace RBAC allow/deny matrix", () => {
         method: "POST",
         url: `/v1/workspaces/${fixture.workspaceId}/api-keys`,
         headers: { "x-api-key": fixture.apiKey },
-        payload: { userId: "some-user", name: "matrix key" },
+        payload: { userId: fixture.userId, name: "matrix key" },
       });
       expect(response.statusCode).toBe(expectApiKeyCreate);
     });

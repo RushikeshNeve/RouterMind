@@ -1,9 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import type { ApiConfig } from "../config.js";
-import { requirePermission } from "../infrastructure/rbac.js";
+import { ensureSameWorkspace, requirePermission } from "../infrastructure/rbac.js";
 import type { WorkspaceRole, WorkspaceService } from "../infrastructure/workspace-service.js";
 
 const roleSchema = z.enum(["owner", "admin", "developer", "viewer"]);
@@ -212,9 +212,19 @@ export function registerWorkspaceRoutes(
       if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
         return reply;
       }
+      const targetUser = await prisma.user.findUnique({
+        where: { id: body.data.userId },
+        select: { principalId: true },
+      });
+      if (!targetUser?.principalId) {
+        return reply.status(400).send({
+          error: { message: "Target user has no Principal yet — run the tenancy backfill first." },
+        });
+      }
       const record = await workspaceService.createApiKey({
         workspaceId: params.data.workspaceId,
         userId: body.data.userId,
+        principalId: targetUser.principalId,
         name: body.data.name,
         nodeEnv: dependencies.config.NODE_ENV,
       });
@@ -259,25 +269,4 @@ function serializeMember(member: {
 
 function validation(reply: FastifyReply) {
   return reply.status(400).send({ error: { message: "Invalid workspace request." } });
-}
-
-/**
- * requirePermission only confirms the caller's role grants the permission
- * within THEIR OWN workspace — it doesn't know which workspace the route
- * targets. Without this check, a valid API key for workspace A could act
- * on any workspace B's resources as long as the caller's role in A happens
- * to carry the required permission.
- */
-function ensureSameWorkspace(
-  request: FastifyRequest,
-  targetWorkspaceId: string,
-  reply: FastifyReply,
-): boolean {
-  if (request.rbacContext?.workspaceId !== targetWorkspaceId) {
-    void reply
-      .status(403)
-      .send({ error: { message: "API key does not belong to this workspace." } });
-    return false;
-  }
-  return true;
 }

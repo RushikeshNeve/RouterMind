@@ -85,6 +85,7 @@ import { registerModelRoutes } from "./routes/models.js";
 import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerProviderHealthRoutes } from "./routes/provider-health.js";
 import { registerResilienceRoutes } from "./routes/resilience.js";
+import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { toSafeErrorResponse } from "./security/errors.js";
 
@@ -220,6 +221,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerEvaluationRoutes(app, evaluationService);
   registerFirewallRoutes(app, promptFirewallService);
   registerWorkspaceRoutes(app, {
+    config: options.config,
+    workspaceService,
+    prisma,
+  });
+  registerServiceAccountRoutes(app, {
     config: options.config,
     workspaceService,
     prisma,

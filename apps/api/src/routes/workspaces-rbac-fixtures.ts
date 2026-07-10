@@ -12,7 +12,10 @@ import { InMemoryRequestLogStore } from "../infrastructure/request-log-store.js"
 import { RetryPolicyService } from "../infrastructure/retry-policy-service.js";
 import { InMemoryRouterDecisionLogStore } from "../infrastructure/router-decision-log-store.js";
 import type { UserAvailabilityStore } from "../infrastructure/user-availability.js";
-import { InMemoryWorkspaceService } from "../infrastructure/workspace-service.js";
+import {
+  InMemoryWorkspaceService,
+  PrismaWorkspaceService,
+} from "../infrastructure/workspace-service.js";
 import { hashApiKey } from "../security/api-key.js";
 import { seedRoles } from "../scripts/seed-rbac.js";
 
@@ -66,6 +69,7 @@ export async function seedWorkspaceWithRole(
   const principal = await prisma.principal.create({
     data: { type: "user", displayName: user.name },
   });
+  await prisma.user.update({ where: { id: user.id }, data: { principalId: principal.id } });
   const membership = await prisma.membership.create({
     data: { workspaceId: workspace.id, principalId: principal.id, role: roleName, roleId: role.id },
   });
@@ -188,4 +192,21 @@ export async function createWorkspaceTestApp(
     requestLogStore,
     availabilityWorkspaceIds,
   };
+}
+
+/**
+ * Like createWorkspaceTestApp, but backed by PrismaWorkspaceService instead
+ * of the in-memory one. Needed for tests that issue a key through a route
+ * and then use that same key against another requirePermission-gated route
+ * in the same test — requirePermission only ever reads real Postgres, so an
+ * in-memory-issued key would never resolve there.
+ */
+export async function createPrismaWorkspaceTestApp(prisma: PrismaClient) {
+  const workspaceService = new PrismaWorkspaceService(prisma);
+  const app = await buildApp({
+    config: testConfig,
+    prisma,
+    workspaceService,
+  });
+  return { app, workspaceService };
 }

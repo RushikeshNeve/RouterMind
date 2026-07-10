@@ -63,6 +63,7 @@ export interface WorkspaceService {
   createApiKey(input: {
     readonly workspaceId: string;
     readonly userId: string;
+    readonly principalId: string;
     readonly name: string;
     readonly nodeEnv: "development" | "test" | "production";
   }): Promise<WorkspaceApiKeyRecord>;
@@ -105,6 +106,7 @@ export class InMemoryWorkspaceService implements WorkspaceService {
     readonly id: string;
     readonly keyHash: string;
     readonly userId: string;
+    readonly principalId: string;
     readonly workspaceId: string;
     readonly name: string;
     readonly createdAt: Date;
@@ -233,6 +235,7 @@ export class InMemoryWorkspaceService implements WorkspaceService {
   createApiKey(input: {
     readonly workspaceId: string;
     readonly userId: string;
+    readonly principalId: string;
     readonly name: string;
     readonly nodeEnv: "development" | "test" | "production";
   }): Promise<WorkspaceApiKeyRecord> {
@@ -242,6 +245,7 @@ export class InMemoryWorkspaceService implements WorkspaceService {
       id: randomUUID(),
       keyHash: hashApiKey(apiKey),
       userId: input.userId,
+      principalId: input.principalId,
       workspaceId: input.workspaceId,
       name: input.name,
       createdAt,
@@ -393,14 +397,15 @@ export class PrismaWorkspaceService implements WorkspaceService {
   async createApiKey(input: {
     readonly workspaceId: string;
     readonly userId: string;
+    readonly principalId: string;
     readonly name: string;
     readonly nodeEnv: "development" | "test" | "production";
   }): Promise<WorkspaceApiKeyRecord> {
     const apiKey = generateRouteMindApiKey(input.nodeEnv);
     const createdAt = new Date();
     await this.prisma.$executeRaw`
-      INSERT INTO "ApiKey" ("id", "keyHash", "userId", "workspaceId", "name", "createdAt", "isActive")
-      VALUES (${randomUUID()}, ${hashApiKey(apiKey)}, ${input.userId}, ${input.workspaceId}, ${input.name}, ${createdAt}, true)
+      INSERT INTO "ApiKey" ("id", "keyHash", "userId", "principalId", "workspaceId", "name", "createdAt", "isActive")
+      VALUES (${randomUUID()}, ${hashApiKey(apiKey)}, ${input.userId}, ${input.principalId}, ${input.workspaceId}, ${input.name}, ${createdAt}, true)
     `;
     return {
       apiKey,
