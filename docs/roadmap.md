@@ -38,6 +38,10 @@ This is the tenancy/RBAC/policy-engine work from the architecture review, unchan
 
 **Why this order:** every later phase — billing, the BYO-Everything USP, enterprise trust — is unbuildable without this. It's also the least visible, least exciting phase, which is exactly why it has to be forced first, before the temptation to build visible features takes over.
 
+### Session log
+
+- **2026-07-10**: Landed the first slice of the `Organization → Workspace → Membership → Principal` schema migration — added the `Organization`, `Principal`, and `Membership` models plus a nullable `Workspace.organizationId` FK (migration `20260710110625_add_org_principal_membership`). Purely additive: no backfill, no changes to the existing `userId`-keyed tables (`ApiKey`, `ProviderCredential`, `WorkspaceMember`, etc.) yet. **Decision**: shared types for these models (`packages/shared/src/types`) were deliberately deferred to the slice that first consumes them, rather than added speculatively now — flagged by `db-migration-check`, resolved as an explicit call, not an oversight. **Next**: backfill script (Principal per existing User, default Org/Workspace per user, reusing any workspace from the earlier beta) + the FK-tightening/cutover slices on `ApiKey`/`ProviderCredential`/etc., per the migration-planner's 4-migration plan (additive → backfill → tighten constraints → cutover). Schema migration checklist item stays unchecked — this is one slice of several, not the full item.
+
 ---
 
 ## Phase 1 — Productization
