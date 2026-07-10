@@ -14,14 +14,8 @@ import {
  * Verifies the Phase 0 exit criteria from docs/roadmap.md: two orgs, each
  * with two workspaces, different roles, different router-model credentials,
  * and proof that one workspace's principal cannot see or spend another
- * workspace's budget.
- *
- * NOT COVERED, on purpose, not by oversight: "cannot list workspace B's API
- * keys." There is no GET/list route for ApiKey anywhere in this codebase —
- * not for your own workspace, let alone someone else's. That's a missing
- * feature, not a security gap this test could close. Confirmed with the
- * user before writing this file rather than fabricating a test against an
- * endpoint that doesn't exist.
+ * workspace's budget, read another workspace's audit log, or list another
+ * workspace's API keys.
  */
 describe("Phase 0 exit criteria: cross-tenant isolation", () => {
   const prisma = new PrismaClient({ datasourceUrl: testConfig.DATABASE_URL });
@@ -220,6 +214,25 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
       const response = await app.inject({
         method: "GET",
         url: `/v1/workspaces/${target.workspaceId}/audit-log`,
+        headers: { "x-api-key": orgAWorkspace1.apiKey },
+      });
+      expect(response.statusCode).toBe(403);
+    }
+  });
+
+  it("does not let workspace A1's Admin list workspace B's api keys", async () => {
+    // Positive control: Admin does have apikey.read in its own workspace.
+    const ownWorkspaceRead = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${orgAWorkspace1.workspaceId}/api-keys`,
+      headers: { "x-api-key": orgAWorkspace1.apiKey },
+    });
+    expect(ownWorkspaceRead.statusCode).toBe(200);
+
+    for (const target of [orgAWorkspace2, orgBWorkspace1, orgBWorkspace2]) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/workspaces/${target.workspaceId}/api-keys`,
         headers: { "x-api-key": orgAWorkspace1.apiKey },
       });
       expect(response.statusCode).toBe(403);

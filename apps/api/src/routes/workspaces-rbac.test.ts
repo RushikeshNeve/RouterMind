@@ -1,6 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
+function parse<T>(response: { payload: string }): T {
+  return JSON.parse(response.payload) as T;
+}
+
 import {
   cleanupFixture,
   createWorkspaceTestApp,
@@ -11,9 +15,13 @@ import {
 
 const ROLES = ["Owner", "Admin", "Developer", "Viewer"] as const;
 
-const ALLOWED_ROLES: Record<"workspace.manage" | "apikey.create", readonly string[]> = {
+const ALLOWED_ROLES: Record<
+  "workspace.manage" | "apikey.create" | "apikey.read",
+  readonly string[]
+> = {
   "workspace.manage": ["Owner"],
   "apikey.create": ["Admin", "Owner"],
+  "apikey.read": ["Admin", "Owner"],
 };
 
 describe("workspace RBAC allow/deny matrix", () => {
@@ -58,6 +66,7 @@ describe("workspace RBAC allow/deny matrix", () => {
     const expectWorkspaceManage = ALLOWED_ROLES["workspace.manage"].includes(role) ? 200 : 403;
     const expectMemberWrite = ALLOWED_ROLES["workspace.manage"].includes(role) ? 201 : 403;
     const expectApiKeyCreate = ALLOWED_ROLES["apikey.create"].includes(role) ? 201 : 403;
+    const expectApiKeyRead = ALLOWED_ROLES["apikey.read"].includes(role) ? 200 : 403;
 
     it(`PATCH /v1/workspaces/:id -> ${expectWorkspaceManage}`, async () => {
       const { context, fixture } = await setupForRole(role);
@@ -111,6 +120,16 @@ describe("workspace RBAC allow/deny matrix", () => {
         payload: { userId: fixture.userId, name: "matrix key" },
       });
       expect(response.statusCode).toBe(expectApiKeyCreate);
+    });
+
+    it(`GET /v1/workspaces/:id/api-keys -> ${expectApiKeyRead}`, async () => {
+      const { context, fixture } = await setupForRole(role);
+      const response = await context.app.inject({
+        method: "GET",
+        url: `/v1/workspaces/${fixture.workspaceId}/api-keys`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+      expect(response.statusCode).toBe(expectApiKeyRead);
     });
   });
 
@@ -199,5 +218,37 @@ describe("workspace RBAC allow/deny matrix", () => {
     });
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it("lists a workspace's own api keys without leaking keyHash", async () => {
+    const { context, fixture } = await setupForRole("Owner");
+
+    const response = await context.app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${fixture.workspaceId}/api-keys`,
+      headers: { "x-api-key": fixture.apiKey },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = parse<{
+      apiKeys: Array<Record<string, unknown>>;
+    }>(response);
+    expect(body.apiKeys).toHaveLength(1);
+    expect(body.apiKeys[0]?.id).toBe(fixture.apiKeyId);
+    expect(body.apiKeys[0]).not.toHaveProperty("keyHash");
+    expect(body.apiKeys[0]).not.toHaveProperty("apiKey");
+  });
+
+  it("rejects cross-workspace api key listing", async () => {
+    const { context, fixture: ownerInWorkspaceA } = await setupForRole("Owner");
+    const { fixture: ownerInWorkspaceB } = await setupForRole("Owner");
+
+    const response = await context.app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${ownerInWorkspaceB.workspaceId}/api-keys`,
+      headers: { "x-api-key": ownerInWorkspaceA.apiKey },
+    });
+
+    expect(response.statusCode).toBe(403);
   });
 });

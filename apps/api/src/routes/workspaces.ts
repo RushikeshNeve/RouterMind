@@ -325,6 +325,38 @@ export function registerWorkspaceRoutes(
   );
 
   app.get(
+    "/v1/workspaces/:workspaceId/api-keys",
+    { preHandler: requirePermission(prisma, "apikey.read") },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      if (!params.success) {
+        return validation(reply);
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
+      const keys = await prisma.apiKey.findMany({
+        where: { workspaceId: params.data.workspaceId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          name: true,
+          principalId: true,
+          userId: true,
+          createdAt: true,
+          isActive: true,
+        },
+      });
+      return {
+        apiKeys: keys.map((key) => ({
+          ...key,
+          createdAt: key.createdAt.toISOString(),
+        })),
+      };
+    },
+  );
+
+  app.get(
     "/v1/workspaces/:workspaceId/audit-log",
     { preHandler: requirePermission(prisma, "audit.read") },
     async (request, reply) => {
