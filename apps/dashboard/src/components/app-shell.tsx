@@ -4,6 +4,7 @@ import clsx from "clsx";
 import {
   Activity,
   BarChart3,
+  Bot,
   Boxes,
   BrainCircuit,
   CircleDollarSign,
@@ -32,10 +33,16 @@ const navItems = [
   { href: "/dashboard/evaluations", label: "Evaluations", icon: BrainCircuit },
   { href: "/dashboard/requests", label: "Requests", icon: ListChecks },
   { href: "/dashboard/members", label: "Members", icon: Users },
-  // The only nav item whose entire page requires a permission end-to-end
-  // (GET /v1/workspaces/:id/audit-log is audit.read-gated server-side) --
-  // the other pages hit ungated analytics endpoints, so they stay visible
-  // to everyone rather than carrying a fake requirement.
+  // These are the nav items whose entire page requires a permission
+  // end-to-end (their list routes are gated server-side) -- the other pages
+  // hit ungated analytics endpoints, so they stay visible to everyone
+  // rather than carrying a fake requirement.
+  {
+    href: "/dashboard/service-accounts",
+    label: "Service Accounts",
+    icon: Bot,
+    requiredPermission: "apikey.read",
+  },
   {
     href: "/dashboard/audit-log",
     label: "Audit Log",

@@ -32,6 +32,29 @@ export interface WorkspaceInvite {
   readonly createdAt: string;
 }
 
+// Capitalized, matching apps/api/src/routes/service-accounts.ts's roleSchema
+// -- distinct from MemberRole's lowercase casing used by the invite/member
+// routes (a pre-existing inconsistency in the backend, not introduced here).
+export type ServiceAccountRole = "Owner" | "Admin" | "Developer" | "Viewer";
+
+export interface ServiceAccountKey {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly isActive: boolean;
+}
+
+export interface ServiceAccount {
+  readonly id: string;
+  readonly principalId: string;
+  readonly displayName: string;
+  readonly description: string | null;
+  readonly role: string;
+  readonly createdByUserId: string;
+  readonly createdAt: string;
+  readonly keys: readonly ServiceAccountKey[];
+}
+
 export interface MyWorkspacePermissions {
   readonly userId: string;
   readonly principalId: string;
@@ -158,6 +181,46 @@ export function revokeInvite(workspaceId: string, inviteId: string): Promise<{ r
 
 export function getMyPermissions(workspaceId: string): Promise<MyWorkspacePermissions> {
   return requestJson(`/v1/workspaces/${workspaceId}/me`);
+}
+
+export function listServiceAccounts(
+  workspaceId: string,
+): Promise<{ serviceAccounts: readonly ServiceAccount[] }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/service-accounts`);
+}
+
+export function createServiceAccount(
+  workspaceId: string,
+  displayName: string,
+  role: ServiceAccountRole,
+  description?: string,
+): Promise<{ serviceAccount: ServiceAccount }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/service-accounts`, {
+    method: "POST",
+    body: { displayName, role, description: description || undefined },
+  });
+}
+
+export function issueServiceAccountKey(
+  workspaceId: string,
+  serviceAccountId: string,
+  name: string,
+): Promise<{ id: string; apiKey: string; workspaceId: string; name: string; createdAt: string }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/service-accounts/${serviceAccountId}/keys`, {
+    method: "POST",
+    body: { name },
+  });
+}
+
+export function revokeServiceAccountKey(
+  workspaceId: string,
+  serviceAccountId: string,
+  keyId: string,
+): Promise<{ revoked: true }> {
+  return requestJson(
+    `/v1/workspaces/${workspaceId}/service-accounts/${serviceAccountId}/keys/${keyId}`,
+    { method: "DELETE" },
+  );
 }
 
 export function listAuditLog(

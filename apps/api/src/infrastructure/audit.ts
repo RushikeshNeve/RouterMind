@@ -6,6 +6,7 @@ export type AuditAction =
   | "member.update"
   | "member.remove"
   | "apikey.create"
+  | "apikey.delete"
   | "service_account.create"
   | "invite.create"
   | "invite.revoke";
