@@ -454,8 +454,31 @@ model Workspace {
   providerCredentials ProviderCredential[]
   modelAccess         UserModelAccess[]
   auditEvents         AuditEvent[]
+  invites             WorkspaceInvite[]
 
   @@index([organizationId])
+}
+
+/// Pending workspace invitations by email. Distinct from Membership because
+/// Membership requires an existing Principal, and an invited email may not
+/// have a User/Principal until they complete the magic-link flow for the
+/// first time.
+model WorkspaceInvite {
+  id                   String    @id @default(cuid())
+  workspaceId          String
+  email                String
+  role                 String
+  tokenHash            String    @unique
+  invitedByPrincipalId String
+  expiresAt            DateTime
+  acceptedAt           DateTime?
+  revokedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([email])
+  @@index([expiresAt])
 }
 
 model WorkspaceMember {

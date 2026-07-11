@@ -34,10 +34,14 @@ export function requestLoginLink(email: string): Promise<{ message: string }> {
   return postJson<{ message: string }>("/v1/auth/request-link", { email });
 }
 
-export function verifyLoginToken(
-  token: string,
-): Promise<{ user: { id: string; email: string; name: string } }> {
-  return postJson<{ user: { id: string; email: string; name: string } }>("/v1/auth/verify", {
-    token,
-  });
+export interface VerifyLoginTokenResult {
+  readonly user: { readonly id: string; readonly email: string; readonly name: string };
+  // Present only when the token was a workspace invite accepted for the
+  // first time -- tells the callback page which workspace to land in
+  // instead of a generic dashboard landing.
+  readonly workspace?: { readonly id: string; readonly name: string };
+}
+
+export function verifyLoginToken(token: string): Promise<VerifyLoginTokenResult> {
+  return postJson<VerifyLoginTokenResult>("/v1/auth/verify", { token });
 }

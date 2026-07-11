@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   ListChecks,
   ShieldCheck,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -26,6 +27,7 @@ const navItems = [
   { href: "/dashboard/resilience", label: "Resilience", icon: ShieldCheck },
   { href: "/dashboard/evaluations", label: "Evaluations", icon: BrainCircuit },
   { href: "/dashboard/requests", label: "Requests", icon: ListChecks },
+  { href: "/dashboard/members", label: "Members", icon: Users },
 ];
 
 export function AppShell({

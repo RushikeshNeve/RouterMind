@@ -1,12 +1,17 @@
 import type { PrismaClient } from "@prisma/client";
+import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ApiConfig } from "../config.js";
 import { requirePermission } from "./rbac.js";
+
+const testConfig = { SESSION_SECRET: "test-session-secret" } as ApiConfig;
 
 async function buildTestApp(prisma: PrismaClient, permission: string) {
   const app = Fastify();
-  app.get("/protected", { preHandler: requirePermission(prisma, permission) }, () => ({
+  await app.register(cookie);
+  app.get("/protected", { preHandler: requirePermission(prisma, permission, testConfig) }, () => ({
     ok: true,
   }));
   await app.ready();

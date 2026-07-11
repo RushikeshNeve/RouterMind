@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { verifyLoginToken } from "../../../lib/auth-client";
+import { setActiveWorkspace } from "../../../lib/workspace-client";
 
 export default function AuthCallbackPage() {
   return (
@@ -27,11 +28,16 @@ function AuthCallbackContent() {
 
     let cancelled = false;
     void verifyLoginToken(token)
-      .then(() => {
+      .then((result) => {
         if (cancelled) return;
-        // No workspace switcher exists yet -- lands on the existing
-        // dashboard root. Replacing this with the switcher is the next
-        // slice, not this one.
+        if (result.workspace) {
+          // First-time invite acceptance -- land directly in the invited
+          // workspace's member list instead of the generic dashboard root.
+          // No org/workspace switcher exists yet for any other case.
+          setActiveWorkspace(result.workspace);
+          router.replace("/dashboard/members");
+          return;
+        }
         router.replace("/dashboard");
       })
       .catch((error: unknown) => {

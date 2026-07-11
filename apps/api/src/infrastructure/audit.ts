@@ -6,9 +6,12 @@ export type AuditAction =
   | "member.update"
   | "member.remove"
   | "apikey.create"
-  | "service_account.create";
+  | "service_account.create"
+  | "invite.create"
+  | "invite.revoke";
 
-export type AuditTargetType = "Workspace" | "WorkspaceMember" | "ApiKey" | "ServiceAccount";
+export type AuditTargetType =
+  "Workspace" | "WorkspaceMember" | "ApiKey" | "ServiceAccount" | "WorkspaceInvite";
 
 export interface AuditEventInput {
   readonly workspaceId: string;

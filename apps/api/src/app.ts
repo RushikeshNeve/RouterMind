@@ -87,6 +87,7 @@ import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerProviderHealthRoutes } from "./routes/provider-health.js";
 import { registerResilienceRoutes } from "./routes/resilience.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerInviteRoutes } from "./routes/invites.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { ConsoleEmailSender, type EmailSender } from "./infrastructure/email-sender.js";
@@ -239,10 +240,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     workspaceService,
     prisma,
   });
+  const emailSender = options.emailSender ?? new ConsoleEmailSender();
   registerAuthRoutes(app, {
     config: options.config,
     prisma,
-    emailSender: options.emailSender ?? new ConsoleEmailSender(),
+    emailSender,
+  });
+  registerInviteRoutes(app, {
+    config: options.config,
+    prisma,
+    emailSender,
   });
   registerProviderHealthRoutes(app, providerHealthService);
   registerResilienceRoutes(app, {

@@ -103,7 +103,7 @@ export function registerWorkspaceRoutes(
 
   app.patch(
     "/v1/workspaces/:workspaceId",
-    { preHandler: requirePermission(prisma, "workspace.manage") },
+    { preHandler: requirePermission(prisma, "workspace.manage", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
       const body = workspacePatchSchema.safeParse(request.body);
@@ -140,7 +140,7 @@ export function registerWorkspaceRoutes(
 
   app.post(
     "/v1/workspaces/:workspaceId/members",
-    { preHandler: requirePermission(prisma, "workspace.manage") },
+    { preHandler: requirePermission(prisma, "workspace.manage", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
       const body = memberCreateSchema.safeParse(request.body);
@@ -176,14 +176,24 @@ export function registerWorkspaceRoutes(
     if (!params.success) {
       return validation(reply);
     }
+    const members = await workspaceService.listMembers(params.data.workspaceId);
+    const users = await prisma.user.findMany({
+      where: { id: { in: members.map((member) => member.userId) } },
+      select: { id: true, email: true, name: true },
+    });
+    const userById = new Map(users.map((user) => [user.id, user]));
     return {
-      members: (await workspaceService.listMembers(params.data.workspaceId)).map(serializeMember),
+      members: members.map((member) => ({
+        ...serializeMember(member),
+        email: userById.get(member.userId)?.email,
+        name: userById.get(member.userId)?.name,
+      })),
     };
   });
 
   app.patch(
     "/v1/workspaces/:workspaceId/members/:memberId",
-    { preHandler: requirePermission(prisma, "workspace.manage") },
+    { preHandler: requirePermission(prisma, "workspace.manage", dependencies.config) },
     async (request, reply) => {
       const params = memberParamsSchema.safeParse(request.params);
       const body = memberPatchSchema.safeParse(request.body);
@@ -232,7 +242,7 @@ export function registerWorkspaceRoutes(
 
   app.delete(
     "/v1/workspaces/:workspaceId/members/:memberId",
-    { preHandler: requirePermission(prisma, "workspace.manage") },
+    { preHandler: requirePermission(prisma, "workspace.manage", dependencies.config) },
     async (request, reply) => {
       const params = memberParamsSchema.safeParse(request.params);
       if (!params.success) {
@@ -277,7 +287,7 @@ export function registerWorkspaceRoutes(
 
   app.post(
     "/v1/workspaces/:workspaceId/api-keys",
-    { preHandler: requirePermission(prisma, "apikey.create") },
+    { preHandler: requirePermission(prisma, "apikey.create", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
       const body = apiKeyCreateSchema.safeParse(request.body);
@@ -326,7 +336,7 @@ export function registerWorkspaceRoutes(
 
   app.get(
     "/v1/workspaces/:workspaceId/api-keys",
-    { preHandler: requirePermission(prisma, "apikey.read") },
+    { preHandler: requirePermission(prisma, "apikey.read", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
       if (!params.success) {
@@ -358,7 +368,7 @@ export function registerWorkspaceRoutes(
 
   app.get(
     "/v1/workspaces/:workspaceId/audit-log",
-    { preHandler: requirePermission(prisma, "audit.read") },
+    { preHandler: requirePermission(prisma, "audit.read", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
       if (!params.success) {

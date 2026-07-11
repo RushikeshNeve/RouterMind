@@ -47,7 +47,7 @@ export function registerServiceAccountRoutes(
 
   app.post(
     "/v1/service-accounts",
-    { preHandler: requirePermission(prisma, "workspace.manage") },
+    { preHandler: requirePermission(prisma, "workspace.manage", dependencies.config) },
     async (request, reply) => {
       const body = serviceAccountCreateSchema.safeParse(request.body);
       if (!body.success) {
@@ -111,7 +111,7 @@ export function registerServiceAccountRoutes(
 
   app.post(
     "/v1/service-accounts/:serviceAccountId/keys",
-    { preHandler: requirePermission(prisma, "apikey.create") },
+    { preHandler: requirePermission(prisma, "apikey.create", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
       const body = serviceAccountKeyCreateSchema.safeParse(request.body);
