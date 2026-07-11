@@ -46,6 +46,15 @@ const memberParamsSchema = paramsSchema.extend({
   memberId: z.string().min(1),
 });
 
+const auditLogQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).optional(),
+  cursor: z.string().min(1).optional(),
+  principalId: z.string().min(1).optional(),
+  action: z.string().min(1).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+});
+
 export function registerWorkspaceRoutes(
   app: FastifyInstance,
   dependencies: {
@@ -371,26 +380,63 @@ export function registerWorkspaceRoutes(
     { preHandler: requirePermission(prisma, "audit.read", dependencies.config) },
     async (request, reply) => {
       const params = paramsSchema.safeParse(request.params);
-      if (!params.success) {
+      const query = auditLogQuerySchema.safeParse(request.query);
+      if (!params.success || !query.success) {
         return validation(reply);
       }
       if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
         return reply;
       }
-      const events = await prisma.auditEvent.findMany({
-        where: { workspaceId: params.data.workspaceId },
-        orderBy: { createdAt: "desc" },
+
+      const limit = query.data.limit ?? 25;
+      const where: Prisma.AuditEventWhereInput = {
+        workspaceId: params.data.workspaceId,
+        ...(query.data.principalId ? { principalId: query.data.principalId } : {}),
+        ...(query.data.action ? { action: query.data.action } : {}),
+        ...(query.data.from || query.data.to
+          ? {
+              createdAt: {
+                ...(query.data.from ? { gte: new Date(query.data.from) } : {}),
+                ...(query.data.to ? { lte: new Date(query.data.to) } : {}),
+              },
+            }
+          : {}),
+      };
+
+      const rows = await prisma.auditEvent.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(query.data.cursor ? { cursor: { id: query.data.cursor }, skip: 1 } : {}),
       });
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      const principalIds = [...new Set(page.map((event) => event.principalId))];
+      const principals = await prisma.principal.findMany({
+        where: { id: { in: principalIds } },
+        select: { id: true, displayName: true, type: true },
+      });
+      const principalById = new Map(principals.map((principal) => [principal.id, principal]));
+
       return {
-        events: events.map((event) => ({
-          id: event.id,
-          principalId: event.principalId,
-          action: event.action,
-          targetType: event.targetType,
-          targetId: event.targetId,
-          metadata: event.metadataJson,
-          createdAt: event.createdAt.toISOString(),
-        })),
+        events: page.map((event) => {
+          const principal = principalById.get(event.principalId);
+          return {
+            id: event.id,
+            principalId: event.principalId,
+            principal: principal
+              ? { displayName: principal.displayName, type: principal.type }
+              : null,
+            action: event.action,
+            targetType: event.targetType,
+            targetId: event.targetId,
+            metadata: event.metadataJson,
+            createdAt: event.createdAt.toISOString(),
+          };
+        }),
+        nextCursor: hasMore ? page[page.length - 1]!.id : null,
       };
     },
   );

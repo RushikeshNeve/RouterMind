@@ -43,11 +43,26 @@ export interface MyWorkspacePermissions {
 export interface AuditEvent {
   readonly id: string;
   readonly principalId: string;
+  readonly principal: { readonly displayName: string; readonly type: string } | null;
   readonly action: string;
   readonly targetType: string;
   readonly targetId: string;
   readonly metadata: unknown;
   readonly createdAt: string;
+}
+
+export interface AuditLogQuery {
+  readonly limit?: number;
+  readonly cursor?: string;
+  readonly principalId?: string;
+  readonly action?: string;
+  readonly from?: string; // ISO datetime
+  readonly to?: string; // ISO datetime
+}
+
+export interface AuditLogPage {
+  readonly events: readonly AuditEvent[];
+  readonly nextCursor: string | null;
 }
 
 // No org/workspace switcher exists yet -- this is the minimal storage this
@@ -145,6 +160,19 @@ export function getMyPermissions(workspaceId: string): Promise<MyWorkspacePermis
   return requestJson(`/v1/workspaces/${workspaceId}/me`);
 }
 
-export function listAuditLog(workspaceId: string): Promise<{ events: readonly AuditEvent[] }> {
-  return requestJson(`/v1/workspaces/${workspaceId}/audit-log`);
+export function listAuditLog(
+  workspaceId: string,
+  query: AuditLogQuery = {},
+): Promise<AuditLogPage> {
+  const params = new URLSearchParams();
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.principalId) params.set("principalId", query.principalId);
+  if (query.action) params.set("action", query.action);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  const queryString = params.toString();
+  return requestJson(
+    `/v1/workspaces/${workspaceId}/audit-log${queryString ? `?${queryString}` : ""}`,
+  );
 }
