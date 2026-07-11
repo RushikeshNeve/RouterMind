@@ -16,6 +16,7 @@
     "backfill:membership-role": "npx --yes tsx@4.20.6 src/scripts/backfill-membership-role.ts",
     "seed:dev": "npx --yes tsx@4.20.6 src/scripts/seed-dev.ts",
     "seed:rbac": "npx --yes tsx@4.20.6 src/scripts/seed-rbac.ts",
+    "qa:phase0": "npx --yes tsx@4.20.6 src/scripts/qa-phase0-dashboard-flow.ts",
     "start": "node dist/server.js"
   },
   "dependencies": {
