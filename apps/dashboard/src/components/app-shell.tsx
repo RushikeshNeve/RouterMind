@@ -11,12 +11,16 @@ import {
   HeartPulse,
   LayoutDashboard,
   ListChecks,
+  Lock,
+  ScrollText,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+
+import { permissionRequirementLabel, usePermissions } from "../lib/permissions-context";
 
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -28,6 +32,16 @@ const navItems = [
   { href: "/dashboard/evaluations", label: "Evaluations", icon: BrainCircuit },
   { href: "/dashboard/requests", label: "Requests", icon: ListChecks },
   { href: "/dashboard/members", label: "Members", icon: Users },
+  // The only nav item whose entire page requires a permission end-to-end
+  // (GET /v1/workspaces/:id/audit-log is audit.read-gated server-side) --
+  // the other pages hit ungated analytics endpoints, so they stay visible
+  // to everyone rather than carrying a fake requirement.
+  {
+    href: "/dashboard/audit-log",
+    label: "Audit Log",
+    icon: ScrollText,
+    requiredPermission: "audit.read",
+  },
 ];
 
 export function AppShell({
@@ -44,6 +58,7 @@ export function AppShell({
   readonly apiBaseUrl: string;
 }) {
   const pathname = usePathname();
+  const { permissions, isLoading: permissionsLoading } = usePermissions();
 
   return (
     <div className="min-h-screen bg-paper text-slate-950 dark:bg-[#0d121c] dark:text-white">
@@ -64,6 +79,25 @@ export function AppShell({
             const active =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));
+            const allowed =
+              permissionsLoading ||
+              !item.requiredPermission ||
+              permissions.has(item.requiredPermission);
+
+            if (!allowed) {
+              return (
+                <span
+                  key={item.href}
+                  title={permissionRequirementLabel(item.requiredPermission!)}
+                  className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 opacity-60"
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                  <Lock className="ml-auto h-3.5 w-3.5" />
+                </span>
+              );
+            }
+
             return (
               <Link
                 key={item.href}
@@ -113,6 +147,24 @@ export function AppShell({
               const active =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
+              const allowed =
+                permissionsLoading ||
+                !item.requiredPermission ||
+                permissions.has(item.requiredPermission);
+
+              if (!allowed) {
+                return (
+                  <span
+                    key={item.href}
+                    title={permissionRequirementLabel(item.requiredPermission!)}
+                    className="flex shrink-0 cursor-not-allowed items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-400 opacity-60 dark:border-slate-800 dark:bg-slate-900"
+                  >
+                    {item.label}
+                    <Lock className="h-3 w-3" />
+                  </span>
+                );
+              }
+
               return (
                 <Link
                   key={item.href}

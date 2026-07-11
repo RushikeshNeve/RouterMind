@@ -88,6 +88,7 @@ import { registerProviderHealthRoutes } from "./routes/provider-health.js";
 import { registerResilienceRoutes } from "./routes/resilience.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerInviteRoutes } from "./routes/invites.js";
+import { registerMeRoutes } from "./routes/me.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { ConsoleEmailSender, type EmailSender } from "./infrastructure/email-sender.js";
@@ -250,6 +251,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     config: options.config,
     prisma,
     emailSender,
+  });
+  registerMeRoutes(app, {
+    config: options.config,
+    prisma,
   });
   registerProviderHealthRoutes(app, providerHealthService);
   registerResilienceRoutes(app, {

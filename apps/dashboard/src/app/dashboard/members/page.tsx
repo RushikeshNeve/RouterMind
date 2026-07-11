@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AppShell, PageBanner } from "../../../components/app-shell";
 import { Card, CardHeader, EmptyState, LoadingPanel } from "../../../components/ui";
+import { permissionRequirementLabel, usePermissions } from "../../../lib/permissions-context";
 import {
   createInvite,
   getActiveWorkspace,
@@ -24,6 +25,9 @@ const apiBaseUrl =
 const ROLE_OPTIONS: readonly MemberRole[] = ["owner", "admin", "developer", "viewer"];
 
 export default function MembersPage() {
+  const { permissions, isLoading: permissionsLoading } = usePermissions();
+  const canManage = permissionsLoading || permissions.has("workspace.manage");
+  const manageTitle = canManage ? undefined : permissionRequirementLabel("workspace.manage");
   const [workspace, setWorkspace] = useState<ActiveWorkspace | undefined>();
   const [members, setMembers] = useState<readonly WorkspaceMember[]>([]);
   const [invites, setInvites] = useState<readonly WorkspaceInvite[]>([]);
@@ -137,18 +141,22 @@ export default function MembersPage() {
                 <input
                   type="email"
                   required
+                  disabled={!canManage}
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
                   placeholder="teammate@company.com"
-                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                  title={manageTitle}
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                 />
               </label>
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Role
                 <select
                   value={inviteRole}
+                  disabled={!canManage}
                   onChange={(event) => setInviteRole(event.target.value as MemberRole)}
-                  className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                  title={manageTitle}
+                  className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                 >
                   {ROLE_OPTIONS.map((role) => (
                     <option key={role} value={role}>
@@ -159,8 +167,9 @@ export default function MembersPage() {
               </label>
               <button
                 type="submit"
-                disabled={isInviting}
-                className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                disabled={isInviting || !canManage}
+                title={manageTitle}
+                className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
               >
                 {isInviting ? "Sending…" : "Send invite"}
               </button>
@@ -197,10 +206,12 @@ export default function MembersPage() {
                       <td className="px-4 py-3">
                         <select
                           value={member.role}
+                          disabled={!canManage}
+                          title={manageTitle}
                           onChange={(event) => {
                             void handleRoleChange(member.id, event.target.value as MemberRole);
                           }}
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-950 outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-950 outline-none focus:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                         >
                           {ROLE_OPTIONS.map((role) => (
                             <option key={role} value={role}>
@@ -212,10 +223,12 @@ export default function MembersPage() {
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"
+                          disabled={!canManage}
+                          title={manageTitle}
                           onClick={() => {
                             void handleRemoveMember(member.id);
                           }}
-                          className="text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+                          className="text-sm font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:text-red-400 dark:disabled:text-slate-600"
                         >
                           Remove
                         </button>
@@ -259,10 +272,12 @@ export default function MembersPage() {
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"
+                          disabled={!canManage}
+                          title={manageTitle}
                           onClick={() => {
                             void handleRevokeInvite(invite.id);
                           }}
-                          className="text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+                          className="text-sm font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:text-red-400 dark:disabled:text-slate-600"
                         >
                           Revoke
                         </button>

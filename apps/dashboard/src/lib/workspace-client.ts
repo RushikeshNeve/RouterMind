@@ -32,6 +32,24 @@ export interface WorkspaceInvite {
   readonly createdAt: string;
 }
 
+export interface MyWorkspacePermissions {
+  readonly userId: string;
+  readonly principalId: string;
+  readonly workspaceId: string;
+  readonly role: { readonly id: string; readonly name: string } | null;
+  readonly permissions: readonly string[];
+}
+
+export interface AuditEvent {
+  readonly id: string;
+  readonly principalId: string;
+  readonly action: string;
+  readonly targetType: string;
+  readonly targetId: string;
+  readonly metadata: unknown;
+  readonly createdAt: string;
+}
+
 // No org/workspace switcher exists yet -- this is the minimal storage this
 // invite flow needs so the Members screen knows which workspace to query.
 // Set on invite acceptance (see auth/callback). Building the full switcher
@@ -121,4 +139,12 @@ export function createInvite(
 
 export function revokeInvite(workspaceId: string, inviteId: string): Promise<{ revoked: true }> {
   return requestJson(`/v1/workspaces/${workspaceId}/invites/${inviteId}`, { method: "DELETE" });
+}
+
+export function getMyPermissions(workspaceId: string): Promise<MyWorkspacePermissions> {
+  return requestJson(`/v1/workspaces/${workspaceId}/me`);
+}
+
+export function listAuditLog(workspaceId: string): Promise<{ events: readonly AuditEvent[] }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/audit-log`);
 }
