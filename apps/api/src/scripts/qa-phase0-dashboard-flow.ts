@@ -83,25 +83,73 @@ async function main(): Promise<void> {
       url: "/v1/auth/request-link",
       payload: { email: brandNewEmail },
     });
-    if (signupAttempt.statusCode === 200 && emailSender.sent.length === 0) {
-      record(
-        "1. Sign up (fresh email, no existing account)",
-        "GAP",
-        "POST /v1/auth/request-link returns 200 (by design, enumeration-safe) but sends no email and creates no User for an address with no existing account. There is no self-serve sign-up flow anywhere in the dashboard -- a User row must already exist before magic-link login works at all. Today the only way a brand-new person gets an account is (a) someone with workspace.manage invites them, or (b) manual/DB-level provisioning. This matches docs/roadmap.md Phase 1's \"Self-serve signup flow\" item, which is explicitly not built yet -- not a regression, but worth confirming it's still accurately reflected as not-yet-done.",
-      );
-    } else {
+    if (signupAttempt.statusCode !== 200 || emailSender.sent.length !== 1) {
       record(
         "1. Sign up (fresh email, no existing account)",
         "FAIL",
-        `Unexpected: request-link for an unknown email sent ${emailSender.sent.length} email(s) or returned ${signupAttempt.statusCode}.`,
+        `POST /v1/auth/request-link for an unknown email returned ${signupAttempt.statusCode} and sent ${emailSender.sent.length} email(s) -- expected 200 and exactly 1 email (self-serve signup sends a token for unknown addresses too, same as a known user's login link).`,
       );
+    } else {
+      const signupToken = extractToken(emailSender.sent[0]!.text);
+      const signupVerify = await app.inject({
+        method: "POST",
+        url: "/v1/auth/verify",
+        payload: { token: signupToken },
+      });
+      if (signupVerify.statusCode !== 200) {
+        record(
+          "1. Sign up (fresh email, no existing account)",
+          "FAIL",
+          `POST /v1/auth/verify for a first-time signup token returned ${signupVerify.statusCode}, expected 200. Body: ${signupVerify.payload}`,
+        );
+      } else {
+        const signupBody = JSON.parse(signupVerify.payload) as {
+          user: { id: string; email: string };
+          workspace: { id: string; name: string } | undefined;
+        };
+        const signupCookie = (() => {
+          try {
+            return extractSessionCookie(signupVerify);
+          } catch {
+            return undefined;
+          }
+        })();
+        if (!signupBody.workspace || !signupCookie) {
+          record(
+            "1. Sign up (fresh email, no existing account)",
+            "FAIL",
+            `verify succeeded (200) but response was missing ${!signupBody.workspace ? "a `workspace`" : ""}${!signupBody.workspace && !signupCookie ? " and " : ""}${!signupCookie ? "a session cookie" : ""} -- expected a default Organization/Workspace to be created and a usable session set on first-time signup. Body: ${signupVerify.payload}`,
+          );
+        } else {
+          const signupUserRow = await prisma.user.findUnique({
+            where: { id: signupBody.user.id },
+            select: { principalId: true },
+          });
+          const signupWorkspaceRow = await prisma.workspace.findUnique({
+            where: { id: signupBody.workspace.id },
+            select: { organizationId: true },
+          });
+          cleanup.userIds.push(signupBody.user.id);
+          if (signupUserRow?.principalId) cleanup.principalIds.push(signupUserRow.principalId);
+          cleanup.workspaceIds.push(signupBody.workspace.id);
+          if (signupWorkspaceRow?.organizationId) {
+            cleanup.organizationIds.push(signupWorkspaceRow.organizationId);
+          }
+          record(
+            "1. Sign up (fresh email, no existing account)",
+            "PASS",
+            `Self-serve signup works end-to-end: request-link sent a token for an unknown email, and first-time verify created User ${signupBody.user.id} (principal ${signupUserRow?.principalId ?? "MISSING"}) + Workspace ${signupBody.workspace.id} (org ${signupWorkspaceRow?.organizationId ?? "MISSING"}) in one transaction, plus a usable session cookie -- all without an invite.`,
+          );
+        }
+      }
     }
 
     // ---------------------------------------------------------------
-    // Bootstrap: since there's no self-serve signup, provision an Owner
-    // the way the one real production user actually got provisioned --
-    // directly, not through any dashboard-reachable route. This mirrors
-    // reality rather than working around it invisibly.
+    // Bootstrap: Step 1 already proved self-serve signup works, but the
+    // rest of this script needs a *stable, known* Owner to drive the
+    // invite/RBAC/service-account steps below -- provisioning one directly
+    // (as the one real production user was originally provisioned) is
+    // simpler than re-deriving IDs from another signup response.
     // ---------------------------------------------------------------
     const ownerOrg = await prisma.organization.create({ data: { name: "QA Co" } });
     cleanup.organizationIds.push(ownerOrg.id);
@@ -187,34 +235,41 @@ async function main(): Promise<void> {
       method: "POST",
       url: "/v1/workspaces",
       headers: { cookie: ownerCookie },
-      payload: { name: "QA Second Workspace" },
+      payload: { name: "QA Second Workspace", organizationId: ownerOrg.id },
     });
-    if (secondWorkspaceResponse.statusCode === 201) {
+    const unauthedWorkspaceResponse = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      payload: { name: "QA Unauthenticated Workspace", organizationId: ownerOrg.id },
+    });
+    if (
+      secondWorkspaceResponse.statusCode === 201 &&
+      unauthedWorkspaceResponse.statusCode === 401
+    ) {
       const body = JSON.parse(secondWorkspaceResponse.payload) as {
         workspace: { id: string; name: string };
       };
       cleanup.workspaceIds.push(body.workspace.id);
       const secondWorkspaceMembership = await prisma.membership.findFirst({
-        where: { workspaceId: body.workspace.id },
+        where: { workspaceId: body.workspace.id, principalId: ownerPrincipal.id, role: "owner" },
       });
       record(
         "3. Create a second workspace",
-        "GAP",
-        `POST /v1/workspaces succeeded (201) and created workspace ${body.workspace.id}, but this route has NO requirePermission gate at all -- it's callable by anyone, including with no cookie or API key whatsoever (confirmed: the request above used the Owner's session, but the route itself never checks it). It also defaults \`ownerUserId\` to the literal string "dev-user" if the caller doesn't pass one explicitly, which nothing in the dashboard does. Worse: it creates a legacy WorkspaceMember row via workspaceService.createWorkspace() but NO Membership/Principal row -- confirmed here (Membership lookup for the new workspace found: ${secondWorkspaceMembership ? "one" : "none"}). That means whoever "owns" a workspace created this way can never actually call any RBAC-gated route in it (Members, invites, service accounts, audit log all 403 forever) -- and there is no dashboard UI calling this route at all today, so this entire path is both unauthenticated and structurally broken relative to the RBAC system built in later slices.`,
+        secondWorkspaceMembership ? "PASS" : "FAIL",
+        secondWorkspaceMembership
+          ? `POST /v1/workspaces succeeded (201) for an authorized Owner with organizationId, created workspace ${body.workspace.id}, and made the caller its Owner via a real Membership row. An unauthenticated call to the same route with the same organizationId correctly returned 401.`
+          : `POST /v1/workspaces succeeded (201) and returned workspace ${body.workspace.id}, but no owner Membership row was created for it -- the caller would be locked out of every RBAC-gated route in the workspace they just created.`,
       );
     } else {
-      // The route can partially create a Workspace row before failing
-      // (insertWorkspace() succeeds, the following addMember() 500s) --
-      // find and clean up any such orphan by slug so re-runs don't leak.
-      const orphan = await prisma.workspace.findUnique({
-        where: { slug: "qa-second-workspace" },
-      });
-      if (orphan) cleanup.workspaceIds.push(orphan.id);
       record(
         "3. Create a second workspace",
         "FAIL",
-        `POST /v1/workspaces returned ${secondWorkspaceResponse.statusCode} (not 201) using the Owner's session cookie. This route has no requirePermission gate at all and defaults \`ownerUserId\` to the literal string "dev-user" when the caller doesn't pass one -- since no User with id "dev-user" exists, the follow-on addMember() call violates a foreign key constraint and the request 500s. There is no dashboard UI calling this route today, so this whole path is both unauthenticated and, as run here, actually broken rather than merely unwired.${orphan ? ` A partially-created Workspace row (${orphan.id}) was left behind before the failure and has been queued for cleanup.` : ""}`,
+        `POST /v1/workspaces with a valid organizationId returned ${secondWorkspaceResponse.statusCode} (not 201) for the authorized Owner, and ${unauthedWorkspaceResponse.statusCode} (not 401) for an unauthenticated caller. Authorized body: ${secondWorkspaceResponse.payload}. Unauthenticated body: ${unauthedWorkspaceResponse.payload}`,
       );
+      if (secondWorkspaceResponse.statusCode === 201) {
+        const body = JSON.parse(secondWorkspaceResponse.payload) as { workspace: { id: string } };
+        cleanup.workspaceIds.push(body.workspace.id);
+      }
     }
 
     // ---------------------------------------------------------------
