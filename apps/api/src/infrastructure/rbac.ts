@@ -12,9 +12,15 @@ export interface RbacContext {
   readonly roleId: string;
 }
 
+export interface RbacOrgContext {
+  readonly principalId: string;
+  readonly organizationId: string;
+}
+
 declare module "fastify" {
   interface FastifyRequest {
     rbacContext?: RbacContext;
+    rbacOrgContext?: RbacOrgContext;
   }
 }
 
@@ -180,6 +186,74 @@ export function requirePermission(
  * on any workspace B's resources as long as the caller's role in A happens
  * to carry the required permission.
  */
+function extractOrganizationIdFromBody(request: FastifyRequest): string | undefined {
+  const body = request.body as { organizationId?: unknown } | undefined;
+  return typeof body?.organizationId === "string" ? body.organizationId : undefined;
+}
+
+/**
+ * Like `requirePermission`, but for actions scoped to an Organization rather
+ * than one Workspace — e.g. creating an additional workspace inside an
+ * existing org, where there's no `:workspaceId` route param yet because the
+ * target workspace doesn't exist. Grants access if the caller has a
+ * Membership carrying `permission` in ANY workspace that belongs to the
+ * organization named in the request body (there is no separate org-level
+ * Membership/Role table today).
+ */
+export function requireOrganizationPermission(
+  prisma: PrismaClient,
+  permission: string,
+  config: ApiConfig,
+): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = extractOrganizationIdFromBody(request);
+    if (!organizationId) {
+      await reply.status(400).send({ error: { message: "organizationId is required." } });
+      return;
+    }
+
+    let principalId: string | undefined;
+    const apiKey = extractApiKey(request);
+    if (apiKey) {
+      const keyRecord = await prisma.apiKey.findUnique({
+        where: { keyHash: hashApiKey(apiKey) },
+        select: { isActive: true, principalId: true },
+      });
+      principalId = keyRecord?.isActive ? (keyRecord.principalId ?? undefined) : undefined;
+    } else {
+      const sessionCookie = request.cookies[SESSION_COOKIE_NAME];
+      const session = sessionCookie
+        ? verifySessionToken(sessionCookie, config.SESSION_SECRET)
+        : undefined;
+      principalId = session?.principalId;
+    }
+
+    if (!principalId) {
+      await sendUnauthorized(reply);
+      return;
+    }
+
+    const membership = await prisma.membership.findFirst({
+      where: { principalId, workspace: { organizationId } },
+      select: { roleId: true },
+    });
+    if (!membership?.roleId) {
+      await sendForbidden(reply);
+      return;
+    }
+
+    const rolePermission = await prisma.rolePermission.findUnique({
+      where: { roleId_permission: { roleId: membership.roleId, permission } },
+    });
+    if (!rolePermission) {
+      await sendForbidden(reply);
+      return;
+    }
+
+    request.rbacOrgContext = { principalId, organizationId };
+  };
+}
+
 export function ensureSameWorkspace(
   request: FastifyRequest,
   targetWorkspaceId: string,

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 export type AuditAction =
+  | "workspace.create"
   | "workspace.update"
   | "member.add"
   | "member.update"

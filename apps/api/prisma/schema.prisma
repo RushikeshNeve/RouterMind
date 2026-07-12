@@ -173,14 +173,19 @@ model User {
 /// separate from ApiKey — this is the human auth path, API keys remain the
 /// machine/programmatic path. tokenHash, never the raw token, is stored
 /// here, matching ApiKey.keyHash.
+/// userId is nullable to support self-serve signup: request-link now issues
+/// a token for unknown emails too (storing the email directly, same pattern
+/// as WorkspaceInvite), and verify creates the User/Principal/Organization/
+/// Workspace on first use.
 model LoginToken {
   id         String    @id @default(cuid())
-  userId     String
+  userId     String?
+  email      String?
   tokenHash  String    @unique
   expiresAt  DateTime
   usedAt     DateTime?
   createdAt  DateTime  @default(now())
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])

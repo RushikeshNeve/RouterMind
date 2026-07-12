@@ -441,7 +441,7 @@ function normalizeMember(row: WorkspaceMemberRecord): WorkspaceMemberRecord {
   return { ...row, createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) };
 }
 
-function slugify(value: string): string {
+export function slugify(value: string): string {
   return value
     .trim()
     .toLowerCase()

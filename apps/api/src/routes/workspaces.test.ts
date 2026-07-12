@@ -26,31 +26,64 @@ describe("workspace routes", () => {
     await fixturePrisma.$disconnect();
   });
 
-  it("creates a workspace and adds a member", async () => {
+  it("creates a workspace within an organization for an authorized caller and makes them Owner", async () => {
     const context = await createWorkspaceTestApp();
     apps.push(context);
+
+    const fixture = await seedWorkspaceWithRole(fixturePrisma, "Owner");
+    fixtures.push(fixture);
 
     const created = await context.app.inject({
       method: "POST",
       url: "/v1/workspaces",
-      payload: { name: "Acme AI", ownerUserId: "owner-user" },
+      headers: { "x-api-key": fixture.apiKey },
+      payload: { name: "Acme AI", organizationId: fixture.organizationId },
     });
     const workspace = parse<{ workspace: { id: string; slug: string } }>(created).workspace;
 
-    const fixture = await seedWorkspaceWithRole(fixturePrisma, "Owner", workspace.id);
-    fixtures.push(fixture);
-
-    const member = await context.app.inject({
-      method: "POST",
-      url: `/v1/workspaces/${workspace.id}/members`,
-      headers: { "x-api-key": fixture.apiKey },
-      payload: { userId: "dev-user-2", role: "developer" },
-    });
-
     expect(created.statusCode).toBe(201);
     expect(workspace.slug).toBe("acme-ai");
-    expect(member.statusCode).toBe(201);
-    expect(parse<{ member: { role: string } }>(member).member.role).toBe("developer");
+
+    const dbWorkspace = await fixturePrisma.workspace.findUnique({ where: { id: workspace.id } });
+    expect(dbWorkspace?.organizationId).toBe(fixture.organizationId);
+
+    const membership = await fixturePrisma.membership.findUnique({
+      where: {
+        workspaceId_principalId: { workspaceId: workspace.id, principalId: fixture.principalId },
+      },
+    });
+    expect(membership?.role).toBe("owner");
+
+    const legacyMember = await fixturePrisma.workspaceMember.findFirst({
+      where: { workspaceId: workspace.id, userId: fixture.userId },
+    });
+    expect(legacyMember?.role).toBe("owner");
+
+    await fixturePrisma.auditEvent.deleteMany({ where: { workspaceId: workspace.id } });
+    await fixturePrisma.membership.deleteMany({ where: { workspaceId: workspace.id } });
+    await fixturePrisma.workspaceMember.deleteMany({ where: { workspaceId: workspace.id } });
+    await fixturePrisma.workspace.deleteMany({ where: { id: workspace.id } });
+  });
+
+  it("rejects an unauthenticated request to create a workspace", async () => {
+    const context = await createWorkspaceTestApp();
+    apps.push(context);
+
+    const fixture = await seedWorkspaceWithRole(fixturePrisma, "Owner");
+    fixtures.push(fixture);
+
+    const response = await context.app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      payload: { name: "No Auth Workspace", organizationId: fixture.organizationId },
+    });
+
+    expect(response.statusCode).toBe(401);
+
+    const workspaces = await fixturePrisma.workspace.findMany({
+      where: { organizationId: fixture.organizationId, name: "No Auth Workspace" },
+    });
+    expect(workspaces).toHaveLength(0);
   });
 
   it("enforces role permissions for API key management", async () => {

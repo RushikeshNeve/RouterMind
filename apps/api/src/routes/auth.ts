@@ -40,24 +40,27 @@ export function registerAuthRoutes(
       return reply.status(400).send({ error: { message: "A valid email is required." } });
     }
 
+    // Unlike before, an unknown email now also gets a token -- self-serve
+    // signup needs a way to complete first-time verify. Storing `email`
+    // directly (userId left null) mirrors the WorkspaceInvite pattern: the
+    // User doesn't exist yet, so there's nothing to key on but the address.
     const user = await prisma.user.findUnique({ where: { email: body.data.email } });
-    if (user) {
-      const rawToken = randomBytes(32).toString("base64url");
-      await prisma.loginToken.create({
-        data: {
-          userId: user.id,
-          tokenHash: hashApiKey(rawToken),
-          expiresAt: new Date(Date.now() + LOGIN_TOKEN_TTL_MS),
-        },
-      });
+    const rawToken = randomBytes(32).toString("base64url");
+    await prisma.loginToken.create({
+      data: {
+        userId: user?.id,
+        email: user ? undefined : body.data.email,
+        tokenHash: hashApiKey(rawToken),
+        expiresAt: new Date(Date.now() + LOGIN_TOKEN_TTL_MS),
+      },
+    });
 
-      const link = `${config.DASHBOARD_URL}/auth/callback?token=${rawToken}`;
-      await emailSender.send({
-        to: user.email,
-        subject: "Your RouteMind login link",
-        text: `Click to log in to RouteMind (expires in 15 minutes):\n\n${link}\n\nIf you didn't request this, you can ignore this email.`,
-      });
-    }
+    const link = `${config.DASHBOARD_URL}/auth/callback?token=${rawToken}`;
+    await emailSender.send({
+      to: user?.email ?? body.data.email,
+      subject: "Your RouteMind login link",
+      text: `Click to ${user ? "log in to" : "create your"} RouteMind account (expires in 15 minutes):\n\n${link}\n\nIf you didn't request this, you can ignore this email.`,
+    });
 
     // Same response whether or not `user` was found -- see comment above.
     return reply.status(200).send({ message: GENERIC_REQUEST_LINK_MESSAGE });
@@ -80,6 +83,99 @@ export function registerAuthRoutes(
     if (loginToken) {
       if (loginToken.usedAt !== null || loginToken.expiresAt.getTime() < Date.now()) {
         return invalidLinkResponse();
+      }
+
+      if (!loginToken.userId || !loginToken.user) {
+        // First-time signup: request-link issued this token for an email
+        // with no User yet. Create User + Principal + a default
+        // Organization + Workspace + Owner Membership in one transaction so
+        // a failure partway through (e.g. Owner role not seeded) leaves no
+        // partial rows behind.
+        if (!loginToken.email) {
+          return reply.status(400).send({
+            error: { message: "This login link is missing an email — request a new one." },
+          });
+        }
+
+        const signupEmail = loginToken.email;
+        const result = await prisma.$transaction(async (tx) => {
+          const existingUser = await tx.user.findUnique({ where: { email: signupEmail } });
+          if (existingUser) {
+            // Race: the account was created via another path between
+            // request-link and verify. Just log them in instead of
+            // creating a duplicate org/workspace.
+            await tx.loginToken.update({
+              where: { id: loginToken.id },
+              data: { usedAt: new Date(), userId: existingUser.id },
+            });
+            return { user: existingUser, workspace: undefined };
+          }
+
+          const ownerRole = await tx.role.findUnique({ where: { name: "Owner" } });
+          if (!ownerRole) {
+            throw new Error("Owner role not seeded -- run seed-rbac.ts before allowing signups.");
+          }
+
+          const displayName = signupEmail.split("@")[0] || signupEmail;
+          const principal = await tx.principal.create({ data: { type: "user", displayName } });
+          const user = await tx.user.create({
+            data: { email: signupEmail, name: displayName, principalId: principal.id },
+          });
+          const organization = await tx.organization.create({
+            data: { name: `${displayName}'s Organization` },
+          });
+          const workspace = await tx.workspace.create({
+            data: {
+              name: "Default",
+              // Derived from the LoginToken's own id (not principal.id) so
+              // it's predictable before the transaction runs -- needed for
+              // deterministically testing the same-transaction rollback.
+              // Equally unique either way (both are cuids).
+              slug: `workspace-${loginToken.id}`,
+              organizationId: organization.id,
+            },
+          });
+          await tx.membership.create({
+            data: {
+              workspaceId: workspace.id,
+              principalId: principal.id,
+              role: "owner",
+              roleId: ownerRole.id,
+            },
+          });
+          const workspaceMember = await new PrismaWorkspaceService(tx).addMember({
+            workspaceId: workspace.id,
+            userId: user.id,
+            role: "owner",
+          });
+          await writeAuditEvent(tx, {
+            workspaceId: workspace.id,
+            principalId: principal.id,
+            action: "member.add",
+            targetType: "WorkspaceMember",
+            targetId: workspaceMember.id,
+            metadata: { email: signupEmail, role: "owner", viaSignup: true },
+          });
+          await tx.loginToken.update({
+            where: { id: loginToken.id },
+            data: { usedAt: new Date(), userId: user.id },
+          });
+
+          return { user, workspace };
+        });
+
+        const sessionToken = createSessionToken(
+          { userId: result.user.id, principalId: result.user.principalId! },
+          config.SESSION_SECRET,
+        );
+        setSessionCookie(reply, sessionToken, config);
+
+        return reply.status(200).send({
+          user: { id: result.user.id, email: result.user.email, name: result.user.name },
+          workspace: result.workspace
+            ? { id: result.workspace.id, name: result.workspace.name }
+            : undefined,
+        });
       }
 
       if (!loginToken.user.principalId) {

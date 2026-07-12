@@ -4,9 +4,14 @@ import { z } from "zod";
 
 import type { ApiConfig } from "../config.js";
 import { writeAuditEvent } from "../infrastructure/audit.js";
-import { ensureSameWorkspace, requirePermission } from "../infrastructure/rbac.js";
+import {
+  ensureSameWorkspace,
+  requireOrganizationPermission,
+  requirePermission,
+} from "../infrastructure/rbac.js";
 import {
   PrismaWorkspaceService,
+  slugify,
   type WorkspaceRole,
   type WorkspaceService,
 } from "../infrastructure/workspace-service.js";
@@ -16,7 +21,7 @@ const roleSchema = z.enum(["owner", "admin", "developer", "viewer"]);
 const workspaceCreateSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1).optional(),
-  ownerUserId: z.string().min(1).optional(),
+  organizationId: z.string().min(1),
 });
 
 const workspacePatchSchema = z.object({
@@ -76,18 +81,67 @@ export function registerWorkspaceRoutes(
       : workspaceService;
   }
 
-  app.post("/v1/workspaces", async (request, reply) => {
-    const parsed = workspaceCreateSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return validation(reply);
-    }
-    const workspace = await workspaceService.createWorkspace({
-      name: parsed.data.name,
-      slug: parsed.data.slug,
-      ownerUserId: parsed.data.ownerUserId ?? "dev-user",
-    });
-    return reply.status(201).send({ workspace: serializeWorkspace(workspace) });
-  });
+  app.post(
+    "/v1/workspaces",
+    { preHandler: requireOrganizationPermission(prisma, "workspace.manage", dependencies.config) },
+    async (request, reply) => {
+      const parsed = workspaceCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return validation(reply);
+      }
+      const orgContext = request.rbacOrgContext!;
+      if (orgContext.organizationId !== parsed.data.organizationId) {
+        return reply
+          .status(403)
+          .send({ error: { message: "Caller does not have access to this organization." } });
+      }
+
+      const ownerRole = await prisma.role.findUnique({ where: { name: "Owner" } });
+      if (!ownerRole) {
+        return reply.status(500).send({ error: { message: "Owner role not seeded." } });
+      }
+      const ownerUser = await prisma.user.findUnique({
+        where: { principalId: orgContext.principalId },
+        select: { id: true },
+      });
+
+      const workspace = await prisma.$transaction(async (tx) => {
+        const created = await tx.workspace.create({
+          data: {
+            name: parsed.data.name,
+            slug: parsed.data.slug ?? slugify(parsed.data.name),
+            organizationId: orgContext.organizationId,
+          },
+        });
+        await tx.membership.create({
+          data: {
+            workspaceId: created.id,
+            principalId: orgContext.principalId,
+            role: "owner",
+            roleId: ownerRole.id,
+          },
+        });
+        if (ownerUser) {
+          await new PrismaWorkspaceService(tx).addMember({
+            workspaceId: created.id,
+            userId: ownerUser.id,
+            role: "owner",
+          });
+        }
+        await writeAuditEvent(tx, {
+          workspaceId: created.id,
+          principalId: orgContext.principalId,
+          action: "workspace.create",
+          targetType: "Workspace",
+          targetId: created.id,
+          metadata: { name: created.name, organizationId: orgContext.organizationId },
+        });
+        return created;
+      });
+
+      return reply.status(201).send({ workspace: serializeWorkspace(workspace) });
+    },
+  );
 
   app.get("/v1/workspaces", async (request) => {
     const query = z.object({ userId: z.string().min(1).optional() }).safeParse(request.query);
