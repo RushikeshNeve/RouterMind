@@ -7,8 +7,10 @@ export interface AuthenticatedUser {
   readonly name: string;
   readonly email: string;
   readonly apiKey: string;
+  readonly apiKeyId?: string;
   readonly workspaceId?: string;
   readonly workspaceRole?: "owner" | "admin" | "developer" | "viewer";
+  readonly organizationId?: string;
 }
 
 export interface ApiKeyAuthenticator {
@@ -36,7 +38,9 @@ export class PrismaApiKeyAuthenticator implements ApiKeyAuthenticator {
         readonly userId: string;
         readonly name: string;
         readonly email: string;
+        readonly apiKeyId: string;
         readonly workspaceId: string | null;
+        readonly organizationId: string | null;
         readonly workspaceRole: "owner" | "admin" | "developer" | "viewer" | null;
       }[]
     >`
@@ -44,10 +48,13 @@ export class PrismaApiKeyAuthenticator implements ApiKeyAuthenticator {
         u."id" AS "userId",
         u."name",
         u."email",
+        a."id" AS "apiKeyId",
         a."workspaceId",
+        w."organizationId",
         m."role" AS "workspaceRole"
       FROM "ApiKey" a
       JOIN "User" u ON u."id" = a."userId"
+      LEFT JOIN "Workspace" w ON w."id" = a."workspaceId"
       LEFT JOIN "WorkspaceMember" m
         ON m."workspaceId" = a."workspaceId" AND m."userId" = a."userId"
       WHERE a."keyHash" = ${hashApiKey(apiKey)}
@@ -61,8 +68,10 @@ export class PrismaApiKeyAuthenticator implements ApiKeyAuthenticator {
         name: record.name,
         email: record.email,
         apiKey,
+        apiKeyId: record.apiKeyId,
         workspaceId: record.workspaceId ?? undefined,
         workspaceRole: record.workspaceRole ?? undefined,
+        organizationId: record.organizationId ?? undefined,
       };
     }
 

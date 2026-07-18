@@ -362,6 +362,7 @@ function createDefaultAuthenticator(
             name: "Workspace User",
             email: `${record.userId}@routemind.local`,
             apiKey,
+            apiKeyId: record.id,
             workspaceId: record.workspaceId,
             workspaceRole: member?.role,
           };
