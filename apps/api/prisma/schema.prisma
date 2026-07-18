@@ -222,20 +222,46 @@ model ApiKey {
 }
 
 model ProviderCredential {
-  id              String     @id @default(cuid())
+  id              String         @id @default(cuid())
   userId          String
   workspaceId     String?
   provider        String
   encryptedApiKey String
-  isEnabled       Boolean    @default(true)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  isEnabled       Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace       Workspace?     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  routerConfigs   RouterConfig[]
 
   @@unique([userId, provider])
   @@index([userId])
   @@index([workspaceId])
+}
+
+/// BYO Router Model config: which provider/model/credential a routing
+/// decision should use at a given scope, so a customer's own routing
+/// credentials -- not the platform's -- pay for and see their own routing
+/// decisions. scopeId is a polymorphic reference (Organization.id,
+/// Workspace.id, or ApiKey.id depending on scopeType) with no enforced FK,
+/// since Prisma can't express "references one of several tables" -- the
+/// same tradeoff WorkspaceInvite already accepts for its email-only path.
+/// Validating that scopeId actually exists is an application-layer concern.
+model RouterConfig {
+  id            String              @id @default(cuid())
+  scopeType     String
+  scopeId       String
+  provider      String
+  model         String
+  fallbackModel String?
+  credentialId  String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  credential    ProviderCredential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+
+  @@unique([scopeType, scopeId])
+  @@index([scopeType, scopeId])
+  @@index([credentialId])
 }
 
 model UserModelAccess {

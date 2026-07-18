@@ -2,6 +2,8 @@ import type { AiGatewayRequest, GatewayRequestContext } from "@routemind/core";
 import { modelPricing } from "@routemind/cost-engine";
 import { getModelRegistryEntry, modelRegistry, type ProviderId } from "@routemind/providers";
 
+export * from "./router-config.js";
+
 export interface RoutingCandidate {
   readonly providerId: ProviderId;
   readonly modelId: string;
