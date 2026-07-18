@@ -34,10 +34,14 @@ function extractToken(emailText: string): string {
 describe("magic-link auth routes", () => {
   const prisma = new PrismaClient({ datasourceUrl: testConfig.DATABASE_URL });
   const createdUserIds: string[] = [];
+  const createdWorkspaceIds: string[] = [];
 
   afterEach(async () => {
     const userIds = createdUserIds.splice(0);
+    const workspaceIds = createdWorkspaceIds.splice(0);
     await prisma.loginToken.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.membership.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
+    await prisma.workspace.deleteMany({ where: { id: { in: workspaceIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   });
 
@@ -54,6 +58,18 @@ describe("magic-link auth routes", () => {
     });
     createdUserIds.push(user.id);
     return user;
+  }
+
+  async function createUserWithWorkspace(email: string) {
+    const user = await createUserWithPrincipal(email);
+    const workspace = await prisma.workspace.create({
+      data: { name: "Test Workspace", slug: `test-ws-${user.principalId}` },
+    });
+    await prisma.membership.create({
+      data: { workspaceId: workspace.id, principalId: user.principalId!, role: "owner" },
+    });
+    createdWorkspaceIds.push(workspace.id);
+    return { user, workspace };
   }
 
   it("sends a login link and returns the same generic message whether or not the email exists", async () => {
@@ -92,7 +108,7 @@ describe("magic-link auth routes", () => {
   it("verifies a valid token, sets a session cookie, and marks the token used", async () => {
     const emailSender = new RecordingEmailSender();
     const app = await buildApp({ config: testConfig, prisma, emailSender });
-    const user = await createUserWithPrincipal(`verify-${Date.now()}@rbac-test.local`);
+    const { user } = await createUserWithWorkspace(`verify-${Date.now()}@rbac-test.local`);
 
     await app.inject({
       method: "POST",
@@ -130,7 +146,7 @@ describe("magic-link auth routes", () => {
   it("rejects a token that has already been used", async () => {
     const emailSender = new RecordingEmailSender();
     const app = await buildApp({ config: testConfig, prisma, emailSender });
-    const user = await createUserWithPrincipal(`reuse-${Date.now()}@rbac-test.local`);
+    const { user } = await createUserWithWorkspace(`reuse-${Date.now()}@rbac-test.local`);
 
     await app.inject({
       method: "POST",
@@ -199,6 +215,70 @@ describe("magic-link auth routes", () => {
     expect(response.statusCode).toBe(400);
 
     await app.close();
+  });
+
+  describe("ordinary (non-invite) login lands the user in a workspace", () => {
+    it("returns the user's workspace via their Membership on a normal login", async () => {
+      const emailSender = new RecordingEmailSender();
+      const app = await buildApp({ config: testConfig, prisma, emailSender });
+      const { user, workspace } = await createUserWithWorkspace(
+        `returning-${Date.now()}@rbac-test.local`,
+      );
+
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/request-link",
+        payload: { email: user.email },
+      });
+      const token = extractToken(emailSender.sent[0]!.text);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/auth/verify",
+        payload: { token },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = parse<{
+        user: { id: string };
+        workspace: { id: string; name: string } | undefined;
+      }>(response);
+      expect(body.user.id).toBe(user.id);
+      expect(body.workspace).toBeDefined();
+      expect(body.workspace!.id).toBe(workspace.id);
+      expect(body.workspace!.name).toBe(workspace.name);
+
+      await app.close();
+    });
+
+    it("returns a clear error instead of a silent null workspace when the user has no Membership", async () => {
+      const emailSender = new RecordingEmailSender();
+      const app = await buildApp({ config: testConfig, prisma, emailSender });
+      const user = await createUserWithPrincipal(`no-membership-${Date.now()}@rbac-test.local`);
+
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/request-link",
+        payload: { email: user.email },
+      });
+      const token = extractToken(emailSender.sent[0]!.text);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/auth/verify",
+        payload: { token },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(parse<{ error: { message: string } }>(response).error.message).toMatch(/membership/i);
+
+      // The token must not be consumed by a failed attempt -- a subsequent
+      // retry (e.g. after being added to a workspace) should still work.
+      const dbToken = await prisma.loginToken.findFirst({ where: { userId: user.id } });
+      expect(dbToken?.usedAt).toBeNull();
+
+      await app.close();
+    });
   });
 
   describe("self-serve signup (first-time verify, no existing User)", () => {

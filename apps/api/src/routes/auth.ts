@@ -184,6 +184,28 @@ export function registerAuthRoutes(
         });
       }
 
+      // Land the returning user in a workspace the same way signup/invite
+      // already do. Membership has no lastActiveAt, so "most recent" means
+      // most-recently-created membership -- the workspace they joined or
+      // were invited to last, which is the closest available proxy.
+      const membership = await prisma.membership.findFirst({
+        where: { principalId: loginToken.user.principalId },
+        orderBy: { createdAt: "desc" },
+        include: { workspace: { select: { id: true, name: true } } },
+      });
+
+      if (!membership) {
+        // Shouldn't happen post-signup-fix (every account gets an Owner
+        // Membership on creation), but a silent null workspace would just
+        // move this failure into the dashboard's empty-state UI instead.
+        return reply.status(400).send({
+          error: {
+            message:
+              "This account has no workspace membership — contact your workspace owner for an invite.",
+          },
+        });
+      }
+
       await prisma.loginToken.update({
         where: { id: loginToken.id },
         data: { usedAt: new Date() },
@@ -197,6 +219,7 @@ export function registerAuthRoutes(
 
       return reply.status(200).send({
         user: { id: loginToken.user.id, email: loginToken.user.email, name: loginToken.user.name },
+        workspace: { id: membership.workspace.id, name: membership.workspace.name },
       });
     }
 
