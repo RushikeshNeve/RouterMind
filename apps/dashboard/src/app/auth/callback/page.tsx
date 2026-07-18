@@ -31,13 +31,18 @@ function AuthCallbackContent() {
       .then((result) => {
         if (cancelled) return;
         if (result.workspace) {
-          // First-time invite acceptance -- land directly in the invited
-          // workspace's member list instead of the generic dashboard root.
-          // No org/workspace switcher exists yet for any other case.
+          // Signup, an ordinary returning-user login, and invite acceptance
+          // all resolve to a workspace now -- set it as active and land
+          // directly in its member list instead of the generic dashboard
+          // root, which would otherwise show every workspace-scoped page's
+          // "no active workspace" empty state. No org/workspace switcher
+          // exists yet to pick a different one.
           setActiveWorkspace(result.workspace);
           router.replace("/dashboard/members");
           return;
         }
+        // Only reachable for the rare signup race noted in auth-client.ts --
+        // a genuine login/signup always returns a workspace or a thrown error.
         router.replace("/dashboard");
       })
       .catch((error: unknown) => {

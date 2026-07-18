@@ -88,10 +88,11 @@ export interface AuditLogPage {
   readonly nextCursor: string | null;
 }
 
-// No org/workspace switcher exists yet -- this is the minimal storage this
-// invite flow needs so the Members screen knows which workspace to query.
-// Set on invite acceptance (see auth/callback). Building the full switcher
-// (multi-membership picker) is separate, deferred work.
+// No org/workspace switcher exists yet -- this is the minimal storage the
+// workspace-scoped pages need to know which workspace to query. Set on every
+// successful /v1/auth/verify that returns a workspace (signup, ordinary
+// login, and invite acceptance alike -- see auth/callback). Building the
+// full switcher (multi-membership picker) is separate, deferred work.
 export function getActiveWorkspace(): ActiveWorkspace | undefined {
   if (typeof window === "undefined") return undefined;
   const raw = window.localStorage.getItem(ACTIVE_WORKSPACE_KEY);

@@ -36,9 +36,12 @@ export function requestLoginLink(email: string): Promise<{ message: string }> {
 
 export interface VerifyLoginTokenResult {
   readonly user: { readonly id: string; readonly email: string; readonly name: string };
-  // Present only when the token was a workspace invite accepted for the
-  // first time -- tells the callback page which workspace to land in
-  // instead of a generic dashboard landing.
+  // Present on first-time signup, an ordinary returning-user login, and
+  // invite acceptance alike -- tells the callback page which workspace to
+  // land in instead of a generic dashboard landing. Only omitted in the rare
+  // signup race where another path created the account between request-link
+  // and verify (see auth.ts); a user with no Membership at all gets a 400
+  // instead of a 200 with no workspace.
   readonly workspace?: { readonly id: string; readonly name: string };
 }
 
