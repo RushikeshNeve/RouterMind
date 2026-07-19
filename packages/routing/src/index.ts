@@ -2,6 +2,8 @@ import type { AiGatewayRequest, GatewayRequestContext } from "@routemind/core";
 import { modelPricing } from "@routemind/cost-engine";
 import { getModelRegistryEntry, modelRegistry, type ProviderId } from "@routemind/providers";
 
+import type { RouterConfigSource } from "./router-config.js";
+
 export * from "./router-config.js";
 
 export interface RoutingCandidate {
@@ -125,6 +127,11 @@ export interface RouterLLMDecision {
   readonly reason: string;
   readonly confidence: number;
   readonly routerModelUsed?: string;
+  // Which BYO Router Model scope resolveRouterConfig() resolved to, so
+  // callers can tell "the workspace's own config was used" apart from
+  // "the platform default was used" -- set even when the resolved provider
+  // turned out to be unusable and a mock decision was returned instead.
+  readonly configSource?: RouterConfigSource;
 }
 
 export interface RouterLLMRequest {
@@ -171,6 +178,7 @@ export interface LLMEngineDecision {
     readonly routerModelUsed?: string;
     readonly routerConfidence?: number;
     readonly routerReason: string;
+    readonly configSource?: RouterConfigSource;
     readonly hardConstraintsApplied: readonly string[];
   };
   readonly unsupported?: false;
@@ -497,6 +505,7 @@ function toEngineDecision(options: {
       routerModelUsed: options.routerDecision?.routerModelUsed,
       routerConfidence: options.routerDecision?.confidence,
       routerReason: options.reason,
+      configSource: options.routerDecision?.configSource,
       hardConstraintsApplied: dedupe(options.hardConstraintsApplied),
       routingStrategy: options.input.strategy,
       fallbackUsed: options.candidate.model !== options.idealModel,

@@ -64,12 +64,56 @@ function fakeAdapter(providerName: string, supportedModels: readonly string[]) {
   return { adapter, chatCompletion };
 }
 
+interface ChatCompletionRoutingResponse {
+  readonly routingMetadata: {
+    readonly configSource?: "request" | "api_key" | "workspace" | "org" | "platform_default";
+  };
+}
+
 describe("RouterConfig wiring into LiveRouterLLMService", () => {
   const prisma = new PrismaClient({ datasourceUrl: testConfig.DATABASE_URL });
 
   afterAll(async () => {
     await prisma.$disconnect();
   });
+
+  function buildTestApp(
+    providerFactorySpy: ReturnType<typeof vi.fn<RouterCredentialProviderFactory>>,
+    openaiAdapter: ProviderAdapter,
+    availabilityStore: UserAvailabilityStore,
+  ) {
+    return buildApp({
+      config: { ...testConfig, ROUTER_LLM_ENABLED: true },
+      prisma,
+      authenticator: new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY),
+      availabilityStore,
+      providers: new Map([["openai", openaiAdapter]]),
+      routerLLMServiceFactory: (providers, context) =>
+        new LiveRouterLLMService(
+          testConfig,
+          providers,
+          new PrismaRouterConfigLookup(prisma),
+          context,
+          prisma,
+          providerFactorySpy,
+        ),
+    });
+  }
+
+  async function sendChatCompletion(app: Awaited<ReturnType<typeof buildApp>>, apiKey: string) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "x-api-key": apiKey },
+      payload: {
+        model: "auto",
+        messages: [{ role: "user", content: "Hello" }],
+        routing: { mode: "llm_assisted", strategy: "balanced" },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    return parse<ChatCompletionRoutingResponse>(response);
+  }
 
   it("uses a workspace-scoped RouterConfig row's resolved provider/model/credential for the router's own decision, instead of the platform default", async () => {
     const fixture = await seedWorkspaceWithRole(prisma, "Owner");
@@ -119,35 +163,8 @@ describe("RouterConfig wiring into LiveRouterLLMService", () => {
         }),
     };
 
-    const app = await buildApp({
-      config: { ...testConfig, ROUTER_LLM_ENABLED: true },
-      prisma,
-      authenticator: new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY),
-      availabilityStore,
-      providers: new Map([["openai", openaiAdapter]]),
-      routerLLMServiceFactory: (providers, context) =>
-        new LiveRouterLLMService(
-          testConfig,
-          providers,
-          new PrismaRouterConfigLookup(prisma),
-          context,
-          prisma,
-          providerFactorySpy,
-        ),
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/chat/completions",
-      headers: { "x-api-key": fixture.apiKey },
-      payload: {
-        model: "auto",
-        messages: [{ role: "user", content: "Hello" }],
-        routing: { mode: "llm_assisted", strategy: "balanced" },
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
+    const app = await buildTestApp(providerFactorySpy, openaiAdapter, availabilityStore);
+    const body = await sendChatCompletion(app, fixture.apiKey);
 
     // The router's own decision-making call used the workspace's resolved
     // provider/model, not the platform default (openai/gpt-4o-mini).
@@ -167,14 +184,77 @@ describe("RouterConfig wiring into LiveRouterLLMService", () => {
     // ambient openai adapter, since the router's returned JSON decision
     // selected openai/gpt-4o (a real deliverable candidate).
     expect(openaiChatCompletion).toHaveBeenCalled();
-    const metadata = parse<{ metadata: { provider: string; selectedModel: string } }>(
-      response,
-    ).metadata;
-    expect(metadata.provider).toBe("openai");
-    expect(metadata.selectedModel).toBe("gpt-4o");
+
+    // Which scope resolveRouterConfig() resolved from is surfaced alongside
+    // the existing routing.reason, reusing its own already-computed value.
+    expect(body.routingMetadata.configSource).toBe("workspace");
 
     await prisma.routerConfig.deleteMany({ where: { id: routerConfig.id } });
     await prisma.providerCredential.deleteMany({ where: { id: credential.id } });
+    await cleanupFixture(prisma, fixture);
+    await app.close();
+  });
+
+  it("reports configSource: api_key when an api_key-scoped RouterConfig row exists", async () => {
+    const fixture = await seedWorkspaceWithRole(prisma, "Owner");
+    const routerConfig = await prisma.routerConfig.create({
+      data: {
+        scopeType: "api_key",
+        scopeId: fixture.apiKeyId,
+        provider: "openai",
+        model: "gpt-4o",
+      },
+    });
+
+    const { adapter: openaiAdapter } = fakeAdapter("openai", ["gpt-4o"]);
+    const providerFactorySpy = vi.fn<RouterCredentialProviderFactory>(() => new Map());
+    const availabilityStore: UserAvailabilityStore = {
+      getAvailability: () =>
+        Promise.resolve({
+          enabledProviders: ["openai"],
+          enabledModels: ["gpt-4o"],
+          providerApiKeys: {},
+        }),
+    };
+
+    const app = await buildTestApp(providerFactorySpy, openaiAdapter, availabilityStore);
+    const body = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(body.routingMetadata.configSource).toBe("api_key");
+
+    await prisma.routerConfig.deleteMany({ where: { id: routerConfig.id } });
+    await cleanupFixture(prisma, fixture);
+    await app.close();
+  });
+
+  it("reports configSource: org when an org-scoped RouterConfig row exists (and no more specific scope does)", async () => {
+    const fixture = await seedWorkspaceWithRole(prisma, "Owner");
+    const routerConfig = await prisma.routerConfig.create({
+      data: {
+        scopeType: "org",
+        scopeId: fixture.organizationId,
+        provider: "openai",
+        model: "gpt-4o",
+      },
+    });
+
+    const { adapter: openaiAdapter } = fakeAdapter("openai", ["gpt-4o"]);
+    const providerFactorySpy = vi.fn<RouterCredentialProviderFactory>(() => new Map());
+    const availabilityStore: UserAvailabilityStore = {
+      getAvailability: () =>
+        Promise.resolve({
+          enabledProviders: ["openai"],
+          enabledModels: ["gpt-4o"],
+          providerApiKeys: {},
+        }),
+    };
+
+    const app = await buildTestApp(providerFactorySpy, openaiAdapter, availabilityStore);
+    const body = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(body.routingMetadata.configSource).toBe("org");
+
+    await prisma.routerConfig.deleteMany({ where: { id: routerConfig.id } });
     await cleanupFixture(prisma, fixture);
     await app.close();
   });
@@ -187,7 +267,6 @@ describe("RouterConfig wiring into LiveRouterLLMService", () => {
       "gpt-4o-mini",
     ]);
     const providerFactorySpy = vi.fn<RouterCredentialProviderFactory>(() => new Map());
-
     const availabilityStore: UserAvailabilityStore = {
       getAvailability: () =>
         Promise.resolve({
@@ -197,35 +276,8 @@ describe("RouterConfig wiring into LiveRouterLLMService", () => {
         }),
     };
 
-    const app = await buildApp({
-      config: { ...testConfig, ROUTER_LLM_ENABLED: true },
-      prisma,
-      authenticator: new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY),
-      availabilityStore,
-      providers: new Map([["openai", openaiAdapter]]),
-      routerLLMServiceFactory: (providers, context) =>
-        new LiveRouterLLMService(
-          testConfig,
-          providers,
-          new PrismaRouterConfigLookup(prisma),
-          context,
-          prisma,
-          providerFactorySpy,
-        ),
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/chat/completions",
-      headers: { "x-api-key": fixture.apiKey },
-      payload: {
-        model: "auto",
-        messages: [{ role: "user", content: "Hello" }],
-        routing: { mode: "llm_assisted", strategy: "balanced" },
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
+    const app = await buildTestApp(providerFactorySpy, openaiAdapter, availabilityStore);
+    const body = await sendChatCompletion(app, fixture.apiKey);
 
     // No credentialId was resolved, so the credential-specific provider
     // factory is never consulted -- the router falls straight to the
@@ -235,6 +287,7 @@ describe("RouterConfig wiring into LiveRouterLLMService", () => {
       (call) => call[0].model === testConfig.ROUTER_LLM_MODEL,
     );
     expect(routerDecisionCall).toBeDefined();
+    expect(body.routingMetadata.configSource).toBe("platform_default");
 
     await cleanupFixture(prisma, fixture);
     await app.close();

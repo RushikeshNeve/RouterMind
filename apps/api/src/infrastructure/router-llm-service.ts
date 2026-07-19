@@ -68,11 +68,17 @@ export class LiveRouterLLMService implements RouterLLMService {
     const routerProvider = await this.resolveProvider(resolved.provider, resolved.credentialId);
 
     if (!routerProvider) {
-      return new MockRouterLLMService().decide(request);
+      return {
+        ...(await new MockRouterLLMService().decide(request)),
+        configSource: resolved.source,
+      };
     }
 
     if (!routerProvider.supportedModels.includes(resolved.model)) {
-      return new MockRouterLLMService().decide(request);
+      return {
+        ...(await new MockRouterLLMService().decide(request)),
+        configSource: resolved.source,
+      };
     }
 
     const prompt = buildRouterPrompt(request);
@@ -105,6 +111,7 @@ export class LiveRouterLLMService implements RouterLLMService {
     return {
       ...parseRouterDecision(content),
       routerModelUsed: resolved.model,
+      configSource: resolved.source,
     };
   }
 
