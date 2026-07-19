@@ -1,14 +1,26 @@
+import type { PrismaClient } from "@prisma/client";
 import { estimateTokens } from "@routemind/cost-engine";
 import type { ChatMessage } from "@routemind/core";
 import type { ProviderAdapter } from "@routemind/providers";
-import type {
-  RouterLLMDecision,
-  RouterLLMRequest,
-  RouterLLMService,
-  RoutingCandidateModel,
+import {
+  resolveRouterConfig,
+  type ResolveRouterConfigContext,
+  type RouterConfigLookup,
+  type RouterLLMDecision,
+  type RouterLLMRequest,
+  type RouterLLMService,
+  type RoutingCandidateModel,
 } from "@routemind/routing";
 
 import type { ApiConfig } from "../config.js";
+import { decryptCredential } from "../security/credentials.js";
+
+export type RouterCredentialProviderFactory = (apiKeys: {
+  readonly openai?: string | undefined;
+  readonly anthropic?: string | undefined;
+  readonly gemini?: string | undefined;
+  readonly groq?: string | undefined;
+}) => Map<string, ProviderAdapter>;
 
 export class MockRouterLLMService implements RouterLLMService {
   decide(request: RouterLLMRequest): Promise<RouterLLMDecision> {
@@ -38,26 +50,35 @@ export class LiveRouterLLMService implements RouterLLMService {
   constructor(
     private readonly config: ApiConfig,
     private readonly providers: Map<string, ProviderAdapter>,
+    private readonly routerConfigLookup: RouterConfigLookup,
+    private readonly context: ResolveRouterConfigContext,
+    private readonly prisma: PrismaClient,
+    private readonly providerFactory: RouterCredentialProviderFactory,
   ) {}
 
   async decide(request: RouterLLMRequest): Promise<RouterLLMDecision> {
-    const routerModel = this.config.ROUTER_LLM_MODEL.startsWith("gpt")
+    const platformDefaultModel = this.config.ROUTER_LLM_MODEL.startsWith("gpt")
       ? this.config.ROUTER_LLM_MODEL
       : "gpt-4o-mini";
-    const routerProvider = this.providers.get("openai");
+    const resolved = await resolveRouterConfig(this.context, this.routerConfigLookup, {
+      provider: "openai",
+      model: platformDefaultModel,
+    });
+
+    const routerProvider = await this.resolveProvider(resolved.provider, resolved.credentialId);
 
     if (!routerProvider) {
       return new MockRouterLLMService().decide(request);
     }
 
-    if (!routerProvider.supportedModels.includes(routerModel)) {
+    if (!routerProvider.supportedModels.includes(resolved.model)) {
       return new MockRouterLLMService().decide(request);
     }
 
     const prompt = buildRouterPrompt(request);
     const estimate = estimateTokens(prompt.length);
     const response = await routerProvider.chatCompletion({
-      model: routerModel,
+      model: resolved.model,
       messages: [
         {
           role: "system",
@@ -83,8 +104,42 @@ export class LiveRouterLLMService implements RouterLLMService {
 
     return {
       ...parseRouterDecision(content),
-      routerModelUsed: routerModel,
+      routerModelUsed: resolved.model,
     };
+  }
+
+  // A resolved credentialId names a *specific* ProviderCredential row, which
+  // may not be the one already baked into `this.providers` (that map only
+  // reflects the calling workspace's own default credential per provider).
+  // Fetch and decrypt that exact row and build a one-off adapter for it,
+  // rather than assuming the ambient providers map already has the right key.
+  private async resolveProvider(
+    provider: string,
+    credentialId: string | undefined,
+  ): Promise<ProviderAdapter | undefined> {
+    if (!credentialId) {
+      return this.providers.get(provider);
+    }
+
+    const credential = await this.prisma.providerCredential.findUnique({
+      where: { id: credentialId },
+    });
+
+    if (!credential || !credential.isEnabled) {
+      return this.providers.get(provider);
+    }
+
+    const decryptedKey = decryptCredential(
+      credential.encryptedApiKey,
+      this.config.CREDENTIAL_ENCRYPTION_KEY,
+    );
+
+    return this.providerFactory({
+      openai: credential.provider === "openai" ? decryptedKey : undefined,
+      anthropic: credential.provider === "anthropic" ? decryptedKey : undefined,
+      gemini: credential.provider === "gemini" ? decryptedKey : undefined,
+      groq: credential.provider === "groq" ? decryptedKey : undefined,
+    }).get(provider);
   }
 }
 

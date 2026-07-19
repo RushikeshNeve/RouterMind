@@ -8,7 +8,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import type { ApiConfig } from "./config.js";
 import type { ProviderAdapter } from "@routemind/providers";
-import type { RouterLLMService } from "@routemind/routing";
+import type { ResolveRouterConfigContext, RouterLLMService } from "@routemind/routing";
 import {
   StaticApiKeyAuthenticator,
   type AuthenticatedUser,
@@ -67,6 +67,7 @@ import {
   type RouterDecisionLogStore,
 } from "./infrastructure/router-decision-log-store.js";
 import { LiveRouterLLMService, MockRouterLLMService } from "./infrastructure/router-llm-service.js";
+import { PrismaRouterConfigLookup } from "./infrastructure/router-config-lookup.js";
 import {
   StaticUserAvailabilityStore,
   createDefaultAvailability,
@@ -118,7 +119,10 @@ export interface BuildAppOptions {
   providers?: Map<string, ProviderAdapter>;
   authenticator?: ApiKeyAuthenticator;
   availabilityStore?: UserAvailabilityStore;
-  routerLLMServiceFactory?: (providers: Map<string, ProviderAdapter>) => RouterLLMService;
+  routerLLMServiceFactory?: (
+    providers: Map<string, ProviderAdapter>,
+    context: ResolveRouterConfigContext,
+  ) => RouterLLMService;
   costGuardrailService?: {
     checkBeforeRequest(input: {
       userId: string;
@@ -275,6 +279,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     authenticator,
     availabilityStore,
   });
+  const providerFactory = (apiKeys: Parameters<typeof createProviderRegistry>[0]["apiKeys"]) =>
+    createProviderRegistry({
+      mode: options.config.PROVIDER_MODE,
+      timeoutMs: options.config.PROVIDER_TIMEOUT_MS,
+      apiKeys,
+    });
   registerChatCompletionRoutes(app, {
     config: options.config,
     authenticator,
@@ -298,18 +308,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     aiPlannerService: options.aiPlannerService ?? new AIPlannerService(),
     providerFallbackService: new ProviderFallbackService(circuitBreakerService),
     providers: options.providers,
-    providerFactory: (apiKeys) =>
-      createProviderRegistry({
-        mode: options.config.PROVIDER_MODE,
-        timeoutMs: options.config.PROVIDER_TIMEOUT_MS,
-        apiKeys,
-      }),
+    providerFactory,
     routerLLMServiceFactory:
       options.routerLLMServiceFactory ??
-      ((providers) =>
+      ((providers, context) =>
         options.config.PROVIDER_MODE === "mock"
           ? new MockRouterLLMService()
-          : new LiveRouterLLMService(options.config, providers)),
+          : new LiveRouterLLMService(
+              options.config,
+              providers,
+              new PrismaRouterConfigLookup(prisma),
+              context,
+              prisma,
+              providerFactory,
+            )),
   });
 
   return app;

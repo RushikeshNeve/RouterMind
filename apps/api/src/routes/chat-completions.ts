@@ -3,6 +3,7 @@ import type { ProviderResponse } from "@routemind/core";
 import type { Tracer } from "@routemind/observability";
 import { type ProviderAdapter, isProviderError } from "@routemind/providers";
 import {
+  type ResolveRouterConfigContext,
   type RouterLLMService,
   type RoutingCandidateModel,
   decideLLMRoute,
@@ -150,7 +151,10 @@ export interface ChatCompletionDependencies {
   readonly providerFactory: (
     apiKeys: UserProviderAvailability["providerApiKeys"],
   ) => Map<string, ProviderAdapter>;
-  readonly routerLLMServiceFactory: (providers: Map<string, ProviderAdapter>) => RouterLLMService;
+  readonly routerLLMServiceFactory: (
+    providers: Map<string, ProviderAdapter>,
+    context: ResolveRouterConfigContext,
+  ) => RouterLLMService;
 }
 
 interface ResilienceAttemptMetadata {
@@ -420,7 +424,11 @@ export function registerChatCompletionRoutes(
         evaluationScores: await dependencies.evaluationService.routingScores(),
         approximateInputTokens: tokenEstimate.inputTokens,
         routerLLMEnabled: dependencies.config.ROUTER_LLM_ENABLED,
-        routerLLMService: dependencies.routerLLMServiceFactory(providers),
+        routerLLMService: dependencies.routerLLMServiceFactory(providers, {
+          apiKeyId: user.apiKeyId,
+          workspaceId: user.workspaceId,
+          organizationId: user.organizationId,
+        }),
       });
 
       if (route.unsupported) {
