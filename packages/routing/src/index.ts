@@ -212,6 +212,21 @@ const tierRank = {
   premium: 3,
 };
 
+// Distinct, stable reason strings for every way the llm_assisted path can
+// fall through to score_based routing -- these used to collapse into one
+// generic "Router LLM skipped or invalid" string, making it impossible to
+// tell "disabled by config" apart from "the router call threw" apart from
+// "the router picked a model that isn't actually available." Exported so
+// tests can assert exact equality instead of fragile substring matching.
+export const LLM_ROUTING_DISABLED_REASON =
+  "LLM-assisted routing is disabled (ROUTER_LLM_ENABLED=false); used score_based fallback instead";
+export const LLM_ROUTING_STRATEGY_SKIP_REASON =
+  "LLM-assisted routing skipped for a cost_first, simple, low-complexity request; used score_based fallback instead";
+export const LLM_ROUTING_CALL_FAILED_REASON =
+  "Router LLM call failed or returned an invalid decision; used score_based fallback instead";
+export const LLM_ROUTING_NO_CANDIDATE_MATCH_REASON =
+  "Router LLM's selected provider/model was not among the available candidates; used score_based fallback instead";
+
 export async function decideLLMRoute(
   input: LLMEngineInput,
 ): Promise<LLMEngineDecision | UnsupportedLLMEngineDecision> {
@@ -267,43 +282,49 @@ export async function decideLLMRoute(
     });
   }
 
-  if (
-    input.mode === "llm_assisted" &&
-    input.routerLLMEnabled &&
-    !(input.strategy === "cost_first" && task === "simple_chat" && complexity === "low")
-  ) {
-    try {
-      const routerDecision = await input.routerLLMService.decide({
-        userPrompt: input.messages.map((message) => message.content).join("\n"),
-        messageCount: input.messages.length,
-        approximateInputTokens: input.approximateInputTokens,
-        candidates,
-        policy: input.policy,
-        strategy: input.strategy,
-        evaluationScores: input.evaluationScores ?? [],
-      });
-      const candidate = candidates.find(
-        (item) =>
-          item.model === routerDecision.selectedModel &&
-          item.provider === routerDecision.selectedProvider,
-      );
+  let llmAssistedFallbackReason: string | undefined;
 
-      if (candidate) {
-        return toEngineDecision({
-          input,
-          task: routerDecision.detectedTask,
-          complexity: routerDecision.complexity,
-          candidate,
-          idealModel: idealModelForTask(task),
+  if (input.mode === "llm_assisted") {
+    if (!input.routerLLMEnabled) {
+      llmAssistedFallbackReason = LLM_ROUTING_DISABLED_REASON;
+    } else if (input.strategy === "cost_first" && task === "simple_chat" && complexity === "low") {
+      llmAssistedFallbackReason = LLM_ROUTING_STRATEGY_SKIP_REASON;
+    } else {
+      try {
+        const routerDecision = await input.routerLLMService.decide({
+          userPrompt: input.messages.map((message) => message.content).join("\n"),
+          messageCount: input.messages.length,
+          approximateInputTokens: input.approximateInputTokens,
           candidates,
-          reason: routerDecision.reason,
-          hardConstraintsApplied,
-          mode: "llm_assisted",
-          routerDecision,
+          policy: input.policy,
+          strategy: input.strategy,
+          evaluationScores: input.evaluationScores ?? [],
         });
+        const candidate = candidates.find(
+          (item) =>
+            item.model === routerDecision.selectedModel &&
+            item.provider === routerDecision.selectedProvider,
+        );
+
+        if (candidate) {
+          return toEngineDecision({
+            input,
+            task: routerDecision.detectedTask,
+            complexity: routerDecision.complexity,
+            candidate,
+            idealModel: idealModelForTask(task),
+            candidates,
+            reason: routerDecision.reason,
+            hardConstraintsApplied,
+            mode: "llm_assisted",
+            routerDecision,
+          });
+        }
+
+        llmAssistedFallbackReason = LLM_ROUTING_NO_CANDIDATE_MATCH_REASON;
+      } catch {
+        llmAssistedFallbackReason = LLM_ROUTING_CALL_FAILED_REASON;
       }
-    } catch {
-      // Invalid router output or provider failure falls through to score-based routing.
     }
   }
 
@@ -316,10 +337,7 @@ export async function decideLLMRoute(
     candidate: scoreCandidate,
     idealModel: idealModelForTask(task),
     candidates,
-    reason:
-      input.mode === "llm_assisted"
-        ? "Router LLM skipped or invalid; used score_based fallback"
-        : `${input.mode} routing selected best-scored candidate`,
+    reason: llmAssistedFallbackReason ?? `${input.mode} routing selected best-scored candidate`,
     hardConstraintsApplied,
     mode: input.mode === "rule_based" ? "rule_based" : "score_based",
   });

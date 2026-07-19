@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ProviderError, type ProviderAdapter } from "@routemind/providers";
-import type { RouterLLMDecision, RouterLLMService, RouterLLMRequest } from "@routemind/routing";
+import {
+  LLM_ROUTING_NO_CANDIDATE_MATCH_REASON,
+  LLM_ROUTING_STRATEGY_SKIP_REASON,
+  type RouterLLMDecision,
+  type RouterLLMService,
+  type RouterLLMRequest,
+} from "@routemind/routing";
 
 import { buildApp } from "../app.js";
 import type { ApiConfig } from "../config.js";
@@ -1424,7 +1430,7 @@ describe("chat completions route", () => {
 
     expect(response.statusCode).toBe(200);
     expect(body.routingMetadata.mode).toBe("score_based");
-    expect(body.routingMetadata.routerReason).toContain("Router LLM skipped or invalid");
+    expect(body.routingMetadata.routerReason).toBe(LLM_ROUTING_NO_CANDIDATE_MATCH_REASON);
   });
 
   it("skips Router LLM for simple cost_first prompts", async () => {
@@ -1463,9 +1469,11 @@ describe("chat completions route", () => {
         routing: { mode: "llm_assisted", strategy: "cost_first" },
       },
     });
+    const body = parseResponse<ChatCompletionTestResponse>(response);
 
     expect(response.statusCode).toBe(200);
     expect(callCount).toBe(0);
+    expect(body.routingMetadata.routerReason).toBe(LLM_ROUTING_STRATEGY_SKIP_REASON);
   });
 
   it("selects a stronger model for high-complexity debugging prompts", async () => {
