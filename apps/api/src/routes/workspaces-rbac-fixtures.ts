@@ -80,6 +80,15 @@ export async function seedWorkspaceWithRole(
   const membership = await prisma.membership.create({
     data: { workspaceId: workspace.id, principalId: principal.id, role: roleName, roleId: role.id },
   });
+  // Kept in sync with the RBAC Membership above, mirroring what the real
+  // invite-acceptance flow does (auth.ts upserts both on accept) -- without
+  // this, AuthenticatedUser.workspaceRole (read from WorkspaceMember by
+  // PrismaApiKeyAuthenticator, not from Membership) is always undefined for
+  // fixture-created users, which nothing previously depended on since
+  // workspaceRole had no live consumer until the policy-engine wiring did.
+  await prisma.workspaceMember.create({
+    data: { workspaceId: workspace.id, userId: user.id, role: roleName.toLowerCase() },
+  });
 
   const apiKey = `rm_test_${randomBytes(24).toString("base64url")}`;
   const apiKeyRecord = await prisma.apiKey.create({

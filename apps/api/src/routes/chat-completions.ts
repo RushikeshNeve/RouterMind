@@ -136,6 +136,8 @@ export interface ChatCompletionDependencies {
     checkBeforeRequest(input: {
       userId: string;
       workspaceId?: string;
+      apiKeyId?: string;
+      workspaceRole?: "owner" | "admin" | "developer" | "viewer";
       estimatedCostUsd: number;
       estimatedTokens: number;
       maxEstimatedCostUsd?: number;
@@ -557,6 +559,8 @@ export function registerChatCompletionRoutes(
         const guardrailCheck = await dependencies.costGuardrailService.checkBeforeRequest({
           userId: user.id,
           workspaceId: user.workspaceId,
+          apiKeyId: user.apiKeyId,
+          workspaceRole: user.workspaceRole,
           estimatedCostUsd,
           estimatedTokens: tokenEstimate.inputTokens + tokenEstimate.outputTokens,
           maxEstimatedCostUsd: parsed.data.routing.maxEstimatedCostUsd,

@@ -73,7 +73,18 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
     }
 
     // A budget per workspace, so spend isolation is provable, not assumed.
-    for (const fixture of [orgAWorkspace1, orgAWorkspace2, orgBWorkspace1, orgBWorkspace2]) {
+    // UserBudget still tracks currentSpendUsd state, but the threshold
+    // enforcement itself now goes through a declarative "budget" Policy row
+    // (see cost-guardrail-service.ts) -- creating only the UserBudget row
+    // here would silently stop enforcing anything after that migration,
+    // since the workspace-scoped check no longer reads UserBudget.maxSpendUsd
+    // directly.
+    for (const [fixture, roleName] of [
+      [orgAWorkspace1, "Admin"],
+      [orgAWorkspace2, "Owner"],
+      [orgBWorkspace1, "Owner"],
+      [orgBWorkspace2, "Developer"],
+    ] as const) {
       await prisma.userBudget.create({
         data: {
           userId: fixture.userId,
@@ -84,12 +95,24 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
           resetAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
       });
+      const role = await prisma.role.findUniqueOrThrow({ where: { name: roleName } });
+      await prisma.policy.create({
+        data: {
+          workspaceId: fixture.workspaceId,
+          subjectType: "role",
+          subjectId: role.id,
+          ruleType: "budget",
+          ruleJson: { maxSpendUsd: 100 },
+          priority: 0,
+        },
+      });
     }
   });
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map(({ app: instance }) => instance.close()));
     const workspaceIds = fixtures.map((fixture) => fixture.workspaceId);
+    await prisma.policy.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
     await prisma.userBudget.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
     await prisma.providerCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
     await prisma.auditEvent.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
