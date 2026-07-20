@@ -18,6 +18,8 @@ const PERMISSION_MIN_ROLE: Record<string, string> = {
   "audit.read": "Admin",
   "router.read": "Admin",
   "router.manage": "Admin",
+  "policy.read": "Admin",
+  "policy.manage": "Admin",
   "budget.manage": "Owner",
   "workspace.manage": "Owner",
 };

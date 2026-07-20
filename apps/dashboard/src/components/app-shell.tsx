@@ -8,6 +8,7 @@ import {
   Boxes,
   BrainCircuit,
   CircleDollarSign,
+  Gavel,
   GitBranch,
   HeartPulse,
   LayoutDashboard,
@@ -49,6 +50,12 @@ const navItems = [
     label: "Router Config",
     icon: Route,
     requiredPermission: "router.read",
+  },
+  {
+    href: "/dashboard/policies",
+    label: "Policies",
+    icon: Gavel,
+    requiredPermission: "policy.read",
   },
   {
     href: "/dashboard/audit-log",

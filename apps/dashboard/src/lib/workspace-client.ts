@@ -116,6 +116,47 @@ export interface ProviderCredentialSummary {
   readonly createdAt: string;
 }
 
+export interface ApiKeySummary {
+  readonly id: string;
+  readonly name: string;
+  readonly principalId: string | null;
+  readonly userId: string;
+  readonly createdAt: string;
+  readonly isActive: boolean;
+}
+
+export interface Role {
+  readonly id: string;
+  readonly name: string;
+}
+
+export type PolicySubjectType = "role" | "user" | "api_key";
+export type PolicyRuleType = "model_restriction" | "cost_cap" | "budget";
+
+export interface Policy {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly subjectType: PolicySubjectType;
+  readonly subjectId: string;
+  readonly ruleType: PolicyRuleType;
+  readonly ruleJson: Record<string, unknown>;
+  readonly priority: number;
+  readonly createdAt: string;
+}
+
+export interface CreatePolicyInput {
+  readonly subjectType: PolicySubjectType;
+  readonly subjectId: string;
+  readonly ruleType: PolicyRuleType;
+  readonly ruleJson: Record<string, unknown>;
+  readonly priority?: number;
+}
+
+export interface UpdatePolicyInput {
+  readonly ruleJson?: Record<string, unknown>;
+  readonly priority?: number;
+}
+
 // No org/workspace switcher exists yet -- this is the minimal storage the
 // workspace-scoped pages need to know which workspace to query. Set on every
 // successful /v1/auth/verify that returns a workspace (signup, ordinary
@@ -325,4 +366,37 @@ export function updateRouterConfig(
 
 export function deleteRouterConfig(workspaceId: string): Promise<{ deleted: true }> {
   return requestJson(`/v1/workspaces/${workspaceId}/router-config`, { method: "DELETE" });
+}
+
+export function listWorkspaceRoles(workspaceId: string): Promise<{ roles: readonly Role[] }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/roles`);
+}
+
+export function listWorkspaceApiKeys(
+  workspaceId: string,
+): Promise<{ apiKeys: readonly ApiKeySummary[] }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/api-keys`);
+}
+
+export function listPolicies(workspaceId: string): Promise<{ policies: readonly Policy[] }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/policies`);
+}
+
+export function createPolicy(workspaceId: string, input: CreatePolicyInput): Promise<Policy> {
+  return requestJson(`/v1/workspaces/${workspaceId}/policies`, { method: "POST", body: input });
+}
+
+export function updatePolicy(
+  workspaceId: string,
+  policyId: string,
+  input: UpdatePolicyInput,
+): Promise<Policy> {
+  return requestJson(`/v1/workspaces/${workspaceId}/policies/${policyId}`, {
+    method: "PATCH",
+    body: input,
+  });
+}
+
+export function deletePolicy(workspaceId: string, policyId: string): Promise<{ deleted: true }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/policies/${policyId}`, { method: "DELETE" });
 }

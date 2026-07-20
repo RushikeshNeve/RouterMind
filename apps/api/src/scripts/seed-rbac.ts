@@ -14,6 +14,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "audit.read",
     "router.read",
     "router.manage",
+    "policy.read",
+    "policy.manage",
   ],
   Owner: [
     "analytics.read",
@@ -28,6 +30,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "audit.read",
     "router.read",
     "router.manage",
+    "policy.read",
+    "policy.manage",
   ],
 };
 
