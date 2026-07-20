@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Lock,
+  Route,
   ScrollText,
   ShieldCheck,
   Users,
@@ -42,6 +43,12 @@ const navItems = [
     label: "Service Accounts",
     icon: Bot,
     requiredPermission: "apikey.read",
+  },
+  {
+    href: "/dashboard/router-config",
+    label: "Router Config",
+    icon: Route,
+    requiredPermission: "router.read",
   },
   {
     href: "/dashboard/audit-log",

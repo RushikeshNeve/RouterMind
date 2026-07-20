@@ -16,6 +16,8 @@ const PERMISSION_MIN_ROLE: Record<string, string> = {
   "apikey.create": "Admin",
   "apikey.delete": "Admin",
   "audit.read": "Admin",
+  "router.read": "Admin",
+  "router.manage": "Admin",
   "budget.manage": "Owner",
   "workspace.manage": "Owner",
 };

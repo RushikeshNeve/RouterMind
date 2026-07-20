@@ -88,6 +88,34 @@ export interface AuditLogPage {
   readonly nextCursor: string | null;
 }
 
+export type RouterProvider = "openai" | "anthropic" | "gemini" | "groq";
+
+export interface RouterConfig {
+  readonly id: string;
+  readonly scopeType: "workspace" | "org" | "api_key";
+  readonly scopeId: string;
+  readonly provider: RouterProvider;
+  readonly model: string;
+  readonly fallbackModel: string | null;
+  readonly credentialId: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RouterConfigInput {
+  readonly provider: RouterProvider;
+  readonly model: string;
+  readonly fallbackModel?: string;
+  readonly credentialId?: string;
+}
+
+export interface ProviderCredentialSummary {
+  readonly id: string;
+  readonly provider: RouterProvider;
+  readonly isEnabled: boolean;
+  readonly createdAt: string;
+}
+
 // No org/workspace switcher exists yet -- this is the minimal storage the
 // workspace-scoped pages need to know which workspace to query. Set on every
 // successful /v1/auth/verify that returns a workspace (signup, ordinary
@@ -239,4 +267,62 @@ export function listAuditLog(
   return requestJson(
     `/v1/workspaces/${workspaceId}/audit-log${queryString ? `?${queryString}` : ""}`,
   );
+}
+
+export function listWorkspaceProviderCredentials(
+  workspaceId: string,
+): Promise<{ credentials: readonly ProviderCredentialSummary[] }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/provider-credentials`);
+}
+
+// A workspace has at most one RouterConfig row (it's a singleton per scope
+// server-side) -- undefined means "none configured yet", not an error, so
+// this deliberately doesn't throw on 404 the way requestJson normally would.
+export async function getRouterConfig(workspaceId: string): Promise<RouterConfig | undefined> {
+  const response = await fetch(`${apiBaseUrl}/v1/workspaces/${workspaceId}/router-config`, {
+    headers: { accept: "application/json" },
+    credentials: "include",
+  });
+  if (response.status === 404) {
+    return undefined;
+  }
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => undefined);
+    const message =
+      payload &&
+      typeof payload === "object" &&
+      "error" in payload &&
+      payload.error &&
+      typeof payload.error === "object" &&
+      "message" in payload.error &&
+      typeof payload.error.message === "string"
+        ? payload.error.message
+        : `Request to load the router config failed with status ${response.status}.`;
+    throw new Error(message);
+  }
+  return (await response.json()) as RouterConfig;
+}
+
+export function createRouterConfig(
+  workspaceId: string,
+  input: RouterConfigInput,
+): Promise<RouterConfig> {
+  return requestJson(`/v1/workspaces/${workspaceId}/router-config`, {
+    method: "POST",
+    body: input,
+  });
+}
+
+export function updateRouterConfig(
+  workspaceId: string,
+  input: Partial<RouterConfigInput>,
+): Promise<RouterConfig> {
+  return requestJson(`/v1/workspaces/${workspaceId}/router-config`, {
+    method: "PATCH",
+    body: input,
+  });
+}
+
+export function deleteRouterConfig(workspaceId: string): Promise<{ deleted: true }> {
+  return requestJson(`/v1/workspaces/${workspaceId}/router-config`, { method: "DELETE" });
 }

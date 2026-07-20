@@ -90,6 +90,7 @@ import { registerResilienceRoutes } from "./routes/resilience.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerMeRoutes } from "./routes/me.js";
+import { registerProviderCredentialRoutes } from "./routes/provider-credentials.js";
 import { registerRouterConfigRoutes } from "./routes/router-config.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
@@ -247,6 +248,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     prisma,
   });
   registerRouterConfigRoutes(app, {
+    config: options.config,
+    prisma,
+  });
+  registerProviderCredentialRoutes(app, {
     config: options.config,
     prisma,
   });
