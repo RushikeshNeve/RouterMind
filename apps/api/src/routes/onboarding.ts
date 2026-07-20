@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { getModelRegistryEntry, modelRegistry, type ProviderId } from "@routemind/providers";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import type { ApiConfig } from "../config.js";
+import type { ApiKeyAuthenticator } from "../infrastructure/authenticator.js";
 import type { OnboardingStore } from "../infrastructure/onboarding-store.js";
 
 const providers = ["openai", "anthropic", "gemini", "groq"] as const;
@@ -46,6 +47,42 @@ const userParamsSchema = z.object({
 export interface OnboardingRouteDependencies {
   readonly config: ApiConfig;
   readonly onboardingStore: OnboardingStore;
+  readonly authenticator: ApiKeyAuthenticator;
+}
+
+/**
+ * Authenticates the caller via X-API-Key and requires it to belong to
+ * expectedUserId -- onboarding.ts's mutating routes (other than the true
+ * bootstrap steps) accept a userId in the body/params, and without this
+ * check that userId was trusted unchecked, letting any caller act on any
+ * other user's account. Sends the 401/403 response itself; returns the
+ * authenticated user on success, undefined on failure.
+ */
+async function requireOwnUser(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  authenticator: ApiKeyAuthenticator,
+  expectedUserId: string,
+) {
+  const header = request.headers["x-api-key"];
+  const apiKey = Array.isArray(header) ? header[0] : header;
+  if (!apiKey) {
+    reply.status(401).send({ error: { message: "An X-API-Key header is required." } });
+    return undefined;
+  }
+
+  const authenticated = await authenticator.authenticate(apiKey);
+  if (!authenticated) {
+    reply.status(401).send({ error: { message: "Invalid API key." } });
+    return undefined;
+  }
+
+  if (authenticated.id !== expectedUserId) {
+    reply.status(403).send({ error: { message: "You may only act on your own account." } });
+    return undefined;
+  }
+
+  return authenticated;
 }
 
 export function registerOnboardingRoutes(
@@ -81,6 +118,21 @@ export function registerOnboardingRoutes(
       return reply.status(404).send({ error: { message: "User not found." } });
     }
 
+    // First key for a user is the true bootstrap step (no prior key exists
+    // to authenticate with). Once a user has one, minting another requires
+    // proving you already control this account.
+    if (await dependencies.onboardingStore.hasActiveApiKey(parsed.data.userId)) {
+      const authenticated = await requireOwnUser(
+        request,
+        reply,
+        dependencies.authenticator,
+        parsed.data.userId,
+      );
+      if (!authenticated) {
+        return reply;
+      }
+    }
+
     const apiKey = generateRouteMindApiKey(dependencies.config.NODE_ENV);
     const record = await dependencies.onboardingStore.createApiKey({
       userId: parsed.data.userId,
@@ -104,6 +156,16 @@ export function registerOnboardingRoutes(
     const user = await dependencies.onboardingStore.findUser(parsed.data.userId);
     if (!user) {
       return reply.status(404).send({ error: { message: "User not found." } });
+    }
+
+    const authenticated = await requireOwnUser(
+      request,
+      reply,
+      dependencies.authenticator,
+      parsed.data.userId,
+    );
+    if (!authenticated) {
+      return reply;
     }
 
     const record = await dependencies.onboardingStore.createProviderCredential({
@@ -131,12 +193,27 @@ export function registerOnboardingRoutes(
       return sendValidationError(reply, body.error.flatten());
     }
 
+    // Ownership isn't known until the caller is authenticated -- unlike the
+    // other routes, expectedUserId can't be checked up front here.
+    const header = request.headers["x-api-key"];
+    const apiKey = Array.isArray(header) ? header[0] : header;
+    if (!apiKey) {
+      return reply.status(401).send({ error: { message: "An X-API-Key header is required." } });
+    }
+    const authenticated = await dependencies.authenticator.authenticate(apiKey);
+    if (!authenticated) {
+      return reply.status(401).send({ error: { message: "Invalid API key." } });
+    }
+
     const record = await dependencies.onboardingStore.updateProviderCredential({
       id: params.data.id,
       isEnabled: body.data.isEnabled,
+      callerUserId: authenticated.id,
     });
 
     if (!record) {
+      // Same response whether the credential doesn't exist or belongs to
+      // someone else -- distinguishing the two would leak which is true.
       return reply.status(404).send({ error: { message: "Provider credential not found." } });
     }
 
@@ -157,6 +234,16 @@ export function registerOnboardingRoutes(
     const user = await dependencies.onboardingStore.findUser(parsed.data.userId);
     if (!user) {
       return reply.status(404).send({ error: { message: "User not found." } });
+    }
+
+    const authenticated = await requireOwnUser(
+      request,
+      reply,
+      dependencies.authenticator,
+      parsed.data.userId,
+    );
+    if (!authenticated) {
+      return reply;
     }
 
     const modelEntry = getModelRegistryEntry(parsed.data.model);
@@ -192,6 +279,16 @@ export function registerOnboardingRoutes(
     const user = await dependencies.onboardingStore.findUser(params.data.userId);
     if (!user) {
       return reply.status(404).send({ error: { message: "User not found." } });
+    }
+
+    const authenticated = await requireOwnUser(
+      request,
+      reply,
+      dependencies.authenticator,
+      params.data.userId,
+    );
+    if (!authenticated) {
+      return reply;
     }
 
     const models = await dependencies.onboardingStore.listAvailableModels(params.data.userId);

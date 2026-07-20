@@ -1,6 +1,8 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { modelRegistry, type ModelRegistryEntry, type ProviderId } from "@routemind/providers";
 
+import { writeAuditEvent } from "./audit.js";
+import { PrismaWorkspaceService } from "./workspace-service.js";
 import { hashApiKey } from "../security/api-key.js";
 import { encryptCredential } from "../security/credentials.js";
 
@@ -51,6 +53,8 @@ export interface AvailableModelRecord {
 export interface OnboardingStore {
   createUser(input: { name: string; email: string }): Promise<UserRecord>;
   createApiKey(input: { userId: string; name: string; rawApiKey: string }): Promise<ApiKeyRecord>;
+  /** Whether userId already has at least one active API key -- used to decide whether minting another one requires proof of ownership. */
+  hasActiveApiKey(userId: string): Promise<boolean>;
   createProviderCredential(input: {
     userId: string;
     provider: ProviderId;
@@ -60,6 +64,7 @@ export interface OnboardingStore {
   updateProviderCredential(input: {
     id: string;
     isEnabled: boolean;
+    callerUserId: string;
   }): Promise<ProviderCredentialRecord | undefined>;
   upsertModelAccess(input: {
     userId: string;
@@ -74,13 +79,86 @@ export interface OnboardingStore {
 export class PrismaOnboardingStore implements OnboardingStore {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async createUser(input: { name: string; email: string }): Promise<UserRecord> {
-    return this.prisma.user.create({
-      data: {
-        name: input.name,
-        email: input.email,
-      },
+  /**
+   * Every mutating onboarding route needs a workspaceId+principalId to
+   * attach an AuditEvent to (both are required FKs on AuditEvent). createUser
+   * provisions this for every new user; existing users predating this slice
+   * already have one via the Phase 0 tenancy backfill.
+   */
+  private async resolveWorkspaceContext(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<{ workspaceId: string; principalId: string }> {
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!user.principalId) {
+      throw new Error(
+        `User ${userId} has no principal -- cannot resolve a workspace to audit against.`,
+      );
+    }
+    const membership = await tx.membership.findFirst({
+      where: { principalId: user.principalId },
+      orderBy: { createdAt: "asc" },
     });
+    if (!membership) {
+      throw new Error(
+        `User ${userId} has no workspace membership -- cannot resolve a workspace to audit against.`,
+      );
+    }
+    return { workspaceId: membership.workspaceId, principalId: user.principalId };
+  }
+
+  async createUser(input: { name: string; email: string }): Promise<UserRecord> {
+    return this.prisma.$transaction(async (tx) => {
+      const ownerRole = await tx.role.findUnique({ where: { name: "Owner" } });
+      if (!ownerRole) {
+        throw new Error("Owner role not seeded -- run seed-rbac.ts before allowing onboarding.");
+      }
+
+      const principal = await tx.principal.create({
+        data: { type: "user", displayName: input.name },
+      });
+      const user = await tx.user.create({
+        data: { name: input.name, email: input.email, principalId: principal.id },
+      });
+      const organization = await tx.organization.create({
+        data: { name: `${input.name}'s Organization` },
+      });
+      const workspace = await tx.workspace.create({
+        data: {
+          name: "Default",
+          slug: `personal-${user.id}`,
+          organizationId: organization.id,
+        },
+      });
+      await tx.membership.create({
+        data: {
+          workspaceId: workspace.id,
+          principalId: principal.id,
+          role: "owner",
+          roleId: ownerRole.id,
+        },
+      });
+      const workspaceMember = await new PrismaWorkspaceService(tx).addMember({
+        workspaceId: workspace.id,
+        userId: user.id,
+        role: "owner",
+      });
+      await writeAuditEvent(tx, {
+        workspaceId: workspace.id,
+        principalId: principal.id,
+        action: "member.add",
+        targetType: "WorkspaceMember",
+        targetId: workspaceMember.id,
+        metadata: { email: input.email, role: "owner", viaOnboarding: true },
+      });
+
+      return user;
+    });
+  }
+
+  async hasActiveApiKey(userId: string): Promise<boolean> {
+    const count = await this.prisma.apiKey.count({ where: { userId, isActive: true } });
+    return count > 0;
   }
 
   async createApiKey(input: {
@@ -88,12 +166,26 @@ export class PrismaOnboardingStore implements OnboardingStore {
     name: string;
     rawApiKey: string;
   }): Promise<ApiKeyRecord> {
-    return this.prisma.apiKey.create({
-      data: {
-        userId: input.userId,
-        name: input.name,
-        keyHash: hashApiKey(input.rawApiKey),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const context = await this.resolveWorkspaceContext(tx, input.userId);
+      const record = await tx.apiKey.create({
+        data: {
+          userId: input.userId,
+          workspaceId: context.workspaceId,
+          principalId: context.principalId,
+          name: input.name,
+          keyHash: hashApiKey(input.rawApiKey),
+        },
+      });
+      await writeAuditEvent(tx, {
+        workspaceId: context.workspaceId,
+        principalId: context.principalId,
+        action: "apikey.create",
+        targetType: "ApiKey",
+        targetId: record.id,
+        metadata: { name: input.name, viaOnboarding: true },
+      });
+      return record;
     });
   }
 
@@ -103,38 +195,66 @@ export class PrismaOnboardingStore implements OnboardingStore {
     apiKey: string;
     encryptionKey: string;
   }): Promise<ProviderCredentialRecord> {
-    return this.prisma.providerCredential.upsert({
-      where: {
-        userId_provider: {
-          userId: input.userId,
-          provider: input.provider,
+    return this.prisma.$transaction(async (tx) => {
+      const context = await this.resolveWorkspaceContext(tx, input.userId);
+      const record = await tx.providerCredential.upsert({
+        where: {
+          userId_provider: {
+            userId: input.userId,
+            provider: input.provider,
+          },
         },
-      },
-      create: {
-        userId: input.userId,
-        provider: input.provider,
-        encryptedApiKey: encryptCredential(input.apiKey, input.encryptionKey),
-        isEnabled: true,
-      },
-      update: {
-        encryptedApiKey: encryptCredential(input.apiKey, input.encryptionKey),
-        isEnabled: true,
-      },
+        create: {
+          userId: input.userId,
+          workspaceId: context.workspaceId,
+          provider: input.provider,
+          encryptedApiKey: encryptCredential(input.apiKey, input.encryptionKey),
+          isEnabled: true,
+        },
+        update: {
+          encryptedApiKey: encryptCredential(input.apiKey, input.encryptionKey),
+          isEnabled: true,
+          workspaceId: context.workspaceId,
+        },
+      });
+      await writeAuditEvent(tx, {
+        workspaceId: context.workspaceId,
+        principalId: context.principalId,
+        action: "provider_credential.upsert",
+        targetType: "ProviderCredential",
+        targetId: record.id,
+        metadata: { provider: input.provider, viaOnboarding: true },
+      });
+      return record;
     });
   }
 
   async updateProviderCredential(input: {
     id: string;
     isEnabled: boolean;
+    callerUserId: string;
   }): Promise<ProviderCredentialRecord | undefined> {
-    try {
-      return await this.prisma.providerCredential.update({
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.providerCredential.findUnique({ where: { id: input.id } });
+      if (!existing || existing.userId !== input.callerUserId) {
+        return undefined;
+      }
+
+      const context = await this.resolveWorkspaceContext(tx, input.callerUserId);
+      const record = await tx.providerCredential.update({
         where: { id: input.id },
         data: { isEnabled: input.isEnabled },
       });
-    } catch {
-      return undefined;
-    }
+      await writeAuditEvent(tx, {
+        workspaceId: context.workspaceId,
+        principalId: context.principalId,
+        action: "provider_credential.update",
+        targetType: "ProviderCredential",
+        targetId: record.id,
+        metadata: { isEnabled: input.isEnabled, viaOnboarding: true },
+      });
+      return record;
+    });
   }
 
   async upsertModelAccess(input: {
@@ -143,18 +263,42 @@ export class PrismaOnboardingStore implements OnboardingStore {
     model: string;
     isEnabled: boolean;
   }): Promise<UserModelAccessRecord> {
-    return this.prisma.userModelAccess.upsert({
-      where: {
-        userId_provider_model: {
+    return this.prisma.$transaction(async (tx) => {
+      const context = await this.resolveWorkspaceContext(tx, input.userId);
+      const record = await tx.userModelAccess.upsert({
+        where: {
+          userId_provider_model: {
+            userId: input.userId,
+            provider: input.provider,
+            model: input.model,
+          },
+        },
+        create: {
           userId: input.userId,
+          workspaceId: context.workspaceId,
           provider: input.provider,
           model: input.model,
+          isEnabled: input.isEnabled,
         },
-      },
-      create: input,
-      update: {
-        isEnabled: input.isEnabled,
-      },
+        update: {
+          isEnabled: input.isEnabled,
+          workspaceId: context.workspaceId,
+        },
+      });
+      await writeAuditEvent(tx, {
+        workspaceId: context.workspaceId,
+        principalId: context.principalId,
+        action: "model_access.upsert",
+        targetType: "UserModelAccess",
+        targetId: record.id,
+        metadata: {
+          provider: input.provider,
+          model: input.model,
+          isEnabled: input.isEnabled,
+          viaOnboarding: true,
+        },
+      });
+      return record;
     });
   }
 
@@ -207,6 +351,10 @@ export class InMemoryOnboardingStore implements OnboardingStore {
     return Promise.resolve(record);
   }
 
+  hasActiveApiKey(userId: string): Promise<boolean> {
+    return Promise.resolve(this.apiKeys.some((key) => key.userId === userId && key.isActive));
+  }
+
   createProviderCredential(input: {
     userId: string;
     provider: ProviderId;
@@ -239,9 +387,10 @@ export class InMemoryOnboardingStore implements OnboardingStore {
   updateProviderCredential(input: {
     id: string;
     isEnabled: boolean;
+    callerUserId: string;
   }): Promise<ProviderCredentialRecord | undefined> {
     const credential = this.providerCredentials.find((item) => item.id === input.id);
-    if (!credential) {
+    if (!credential || credential.userId !== input.callerUserId) {
       return Promise.resolve(undefined);
     }
 

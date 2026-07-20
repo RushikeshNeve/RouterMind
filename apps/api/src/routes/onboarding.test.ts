@@ -217,10 +217,17 @@ describe("onboarding routes", () => {
       name: "Rushikesh",
       email: "rushikesh@example.com",
     });
+    const apiKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: user.id, name: "Local Dev Key" },
+    });
+    const apiKey = parseResponse<ApiKeyResponse>(apiKeyResponse).apiKey;
 
     const response = await app.inject({
       method: "POST",
       url: "/v1/provider-credentials",
+      headers: { "x-api-key": apiKey },
       payload: {
         userId: user.id,
         provider: "openai",
@@ -236,6 +243,156 @@ describe("onboarding routes", () => {
     });
     expect(response.payload).not.toContain("sk-test-secret");
     expect(onboardingStore.providerCredentials[0]?.encryptedApiKey).not.toBe("sk-test-secret");
+  });
+
+  it("rejects a provider-credentials call with no API key", async () => {
+    const { app, onboardingStore } = await createOnboardingTestApp();
+    apps.push(app);
+    const user = await onboardingStore.createUser({
+      name: "Rushikesh",
+      email: "rushikesh@example.com",
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/provider-credentials",
+      payload: { userId: user.id, provider: "openai", apiKey: "sk-test-secret" },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects a provider-credentials call authenticated as a different user (IDOR)", async () => {
+    const { app, onboardingStore } = await createOnboardingTestApp();
+    apps.push(app);
+    const victim = await onboardingStore.createUser({
+      name: "Victim",
+      email: "victim@example.com",
+    });
+    const attacker = await onboardingStore.createUser({
+      name: "Attacker",
+      email: "attacker@example.com",
+    });
+    const attackerKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: attacker.id, name: "Attacker Key" },
+    });
+    const attackerKey = parseResponse<ApiKeyResponse>(attackerKeyResponse).apiKey;
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/provider-credentials",
+      headers: { "x-api-key": attackerKey },
+      payload: { userId: victim.id, provider: "openai", apiKey: "sk-stolen" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(onboardingStore.providerCredentials).toHaveLength(0);
+  });
+
+  it("requires proof of ownership to mint a second API key for the same user", async () => {
+    const { app, onboardingStore } = await createOnboardingTestApp();
+    apps.push(app);
+    const user = await onboardingStore.createUser({
+      name: "Rushikesh",
+      email: "rushikesh@example.com",
+    });
+    const firstKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: user.id, name: "First Key" },
+    });
+    expect(firstKeyResponse.statusCode).toBe(201);
+    const firstKey = parseResponse<ApiKeyResponse>(firstKeyResponse).apiKey;
+
+    const noAuthResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: user.id, name: "Second Key" },
+    });
+    expect(noAuthResponse.statusCode).toBe(401);
+
+    const ownedResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      headers: { "x-api-key": firstKey },
+      payload: { userId: user.id, name: "Second Key" },
+    });
+    expect(ownedResponse.statusCode).toBe(201);
+    expect(onboardingStore.apiKeys).toHaveLength(2);
+  });
+
+  it("PATCHes a provider credential only for its owner, 404s for anyone else", async () => {
+    const { app, onboardingStore } = await createOnboardingTestApp();
+    apps.push(app);
+    const owner = await onboardingStore.createUser({ name: "Owner", email: "owner@example.com" });
+    const other = await onboardingStore.createUser({ name: "Other", email: "other@example.com" });
+    const ownerKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: owner.id, name: "Owner Key" },
+    });
+    const ownerKey = parseResponse<ApiKeyResponse>(ownerKeyResponse).apiKey;
+    const otherKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: other.id, name: "Other Key" },
+    });
+    const otherKey = parseResponse<ApiKeyResponse>(otherKeyResponse).apiKey;
+    const credential = await onboardingStore.createProviderCredential({
+      userId: owner.id,
+      provider: "openai",
+      apiKey: "sk-test-secret",
+      encryptionKey: testConfig.CREDENTIAL_ENCRYPTION_KEY,
+    });
+
+    const foreignAttempt = await app.inject({
+      method: "PATCH",
+      url: `/v1/provider-credentials/${credential.id}`,
+      headers: { "x-api-key": otherKey },
+      payload: { isEnabled: false },
+    });
+    expect(foreignAttempt.statusCode).toBe(404);
+    expect(onboardingStore.providerCredentials[0]?.isEnabled).toBe(true);
+
+    const ownAttempt = await app.inject({
+      method: "PATCH",
+      url: `/v1/provider-credentials/${credential.id}`,
+      headers: { "x-api-key": ownerKey },
+      payload: { isEnabled: false },
+    });
+    expect(ownAttempt.statusCode).toBe(200);
+    expect(parseResponse<ProviderCredentialResponse>(ownAttempt).isEnabled).toBe(false);
+  });
+
+  it("rejects a model-access call authenticated as a different user", async () => {
+    const { app, onboardingStore } = await createOnboardingTestApp();
+    apps.push(app);
+    const victim = await onboardingStore.createUser({
+      name: "Victim",
+      email: "victim2@example.com",
+    });
+    const attacker = await onboardingStore.createUser({
+      name: "Attacker",
+      email: "attacker2@example.com",
+    });
+    const attackerKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: attacker.id, name: "Attacker Key" },
+    });
+    const attackerKey = parseResponse<ApiKeyResponse>(attackerKeyResponse).apiKey;
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/model-access",
+      headers: { "x-api-key": attackerKey },
+      payload: { userId: victim.id, provider: "openai", model: "gpt-4o", isEnabled: true },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(onboardingStore.modelAccess).toHaveLength(0);
   });
 
   it("lists user available models with capabilities and provider enablement", async () => {
@@ -257,10 +414,17 @@ describe("onboarding routes", () => {
       model: "gpt-4o",
       isEnabled: true,
     });
+    const apiKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: user.id, name: "Local Dev Key" },
+    });
+    const apiKey = parseResponse<ApiKeyResponse>(apiKeyResponse).apiKey;
 
     const response = await app.inject({
       method: "GET",
       url: `/v1/users/${user.id}/available-models`,
+      headers: { "x-api-key": apiKey },
     });
     const body = parseResponse<AvailableModelsResponse>(response);
 
@@ -276,6 +440,33 @@ describe("onboarding routes", () => {
       }),
     );
     expect(body.models[0]?.capabilities).toContain("reasoning");
+  });
+
+  it("rejects an available-models read authenticated as a different user", async () => {
+    const { app, onboardingStore } = await createOnboardingTestApp();
+    apps.push(app);
+    const victim = await onboardingStore.createUser({
+      name: "Victim",
+      email: "victim3@example.com",
+    });
+    const attacker = await onboardingStore.createUser({
+      name: "Attacker",
+      email: "attacker3@example.com",
+    });
+    const attackerKeyResponse = await app.inject({
+      method: "POST",
+      url: "/v1/api-keys",
+      payload: { userId: attacker.id, name: "Attacker Key" },
+    });
+    const attackerKey = parseResponse<ApiKeyResponse>(attackerKeyResponse).apiKey;
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/users/${victim.id}/available-models`,
+      headers: { "x-api-key": attackerKey },
+    });
+
+    expect(response.statusCode).toBe(403);
   });
 
   it("routes using user-specific available models from the generated API key", async () => {

@@ -275,13 +275,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     circuitBreakerService,
     providerAttemptLogStore,
   });
-  registerOnboardingRoutes(app, {
-    config: options.config,
-    onboardingStore: options.onboardingStore ?? new InMemoryOnboardingStore(),
-  });
   const authenticator =
     options.authenticator ??
     createDefaultAuthenticator(options.config.DEV_API_KEY, workspaceService);
+  registerOnboardingRoutes(app, {
+    config: options.config,
+    onboardingStore: options.onboardingStore ?? new InMemoryOnboardingStore(),
+    authenticator,
+  });
   const availabilityStore =
     options.availabilityStore ??
     new StaticUserAvailabilityStore(createDefaultAvailability(options.config));

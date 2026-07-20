@@ -13,7 +13,10 @@ export type AuditAction =
   | "invite.revoke"
   | "router_config.create"
   | "router_config.update"
-  | "router_config.delete";
+  | "router_config.delete"
+  | "provider_credential.upsert"
+  | "provider_credential.update"
+  | "model_access.upsert";
 
 export type AuditTargetType =
   | "Workspace"
@@ -21,7 +24,9 @@ export type AuditTargetType =
   | "ApiKey"
   | "ServiceAccount"
   | "WorkspaceInvite"
-  | "RouterConfig";
+  | "RouterConfig"
+  | "ProviderCredential"
+  | "UserModelAccess";
 
 export interface AuditEventInput {
   readonly workspaceId: string;
