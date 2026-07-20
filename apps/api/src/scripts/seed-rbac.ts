@@ -12,6 +12,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "apikey.create",
     "apikey.delete",
     "audit.read",
+    "router.read",
+    "router.manage",
   ],
   Owner: [
     "analytics.read",
@@ -24,6 +26,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "budget.manage",
     "workspace.manage",
     "audit.read",
+    "router.read",
+    "router.manage",
   ],
 };
 

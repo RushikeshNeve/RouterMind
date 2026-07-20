@@ -10,10 +10,18 @@ export type AuditAction =
   | "apikey.delete"
   | "service_account.create"
   | "invite.create"
-  | "invite.revoke";
+  | "invite.revoke"
+  | "router_config.create"
+  | "router_config.update"
+  | "router_config.delete";
 
 export type AuditTargetType =
-  "Workspace" | "WorkspaceMember" | "ApiKey" | "ServiceAccount" | "WorkspaceInvite";
+  | "Workspace"
+  | "WorkspaceMember"
+  | "ApiKey"
+  | "ServiceAccount"
+  | "WorkspaceInvite"
+  | "RouterConfig";
 
 export interface AuditEventInput {
   readonly workspaceId: string;

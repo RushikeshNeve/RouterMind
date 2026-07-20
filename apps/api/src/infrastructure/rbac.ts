@@ -15,6 +15,11 @@ export interface RbacContext {
 export interface RbacOrgContext {
   readonly principalId: string;
   readonly organizationId: string;
+  // The workspace whose Membership satisfied the org-level permission check
+  // (there's no separate org-level Membership table) -- exposed so routes
+  // that need a concrete workspaceId for something org-scoped (e.g. the
+  // required workspaceId FK on AuditEvent) don't have to re-query for one.
+  readonly workspaceId: string;
 }
 
 declare module "fastify" {
@@ -186,7 +191,15 @@ export function requirePermission(
  * on any workspace B's resources as long as the caller's role in A happens
  * to carry the required permission.
  */
-function extractOrganizationIdFromBody(request: FastifyRequest): string | undefined {
+function extractOrganizationId(request: FastifyRequest): string | undefined {
+  const params = request.params as { organizationId?: unknown } | undefined;
+  if (typeof params?.organizationId === "string") {
+    return params.organizationId;
+  }
+  // Falls back to the body for routes with no :organizationId route param
+  // (e.g. POST /v1/workspaces, which creates the org's first workspace and
+  // so has nothing to put in a URL segment yet). GET/DELETE requests have
+  // no body, so any route that needs to work for those must use the param.
   const body = request.body as { organizationId?: unknown } | undefined;
   return typeof body?.organizationId === "string" ? body.organizationId : undefined;
 }
@@ -206,7 +219,7 @@ export function requireOrganizationPermission(
   config: ApiConfig,
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    const organizationId = extractOrganizationIdFromBody(request);
+    const organizationId = extractOrganizationId(request);
     if (!organizationId) {
       await reply.status(400).send({ error: { message: "organizationId is required." } });
       return;
@@ -235,7 +248,7 @@ export function requireOrganizationPermission(
 
     const membership = await prisma.membership.findFirst({
       where: { principalId, workspace: { organizationId } },
-      select: { roleId: true },
+      select: { roleId: true, workspaceId: true },
     });
     if (!membership?.roleId) {
       await sendForbidden(reply);
@@ -250,7 +263,7 @@ export function requireOrganizationPermission(
       return;
     }
 
-    request.rbacOrgContext = { principalId, organizationId };
+    request.rbacOrgContext = { principalId, organizationId, workspaceId: membership.workspaceId };
   };
 }
 
