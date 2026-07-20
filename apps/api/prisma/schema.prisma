@@ -486,8 +486,33 @@ model Workspace {
   modelAccess         UserModelAccess[]
   auditEvents         AuditEvent[]
   invites             WorkspaceInvite[]
+  policies            Policy[]
 
   @@index([organizationId])
+}
+
+/// Declarative policy rows (budget caps, per-request cost caps, model
+/// restrictions) scoped to a workspace and targeted at a role, a specific
+/// user, or a specific API key. Unlike RouterConfig's scopeId, subjectId
+/// here has a real enforced FK-adjacent shape (subjectType names which
+/// table subjectId points at), but Prisma still can't express "references
+/// one of several tables" natively, so subjectId itself is unvalidated at
+/// the schema level -- same tradeoff as RouterConfig.scopeId and
+/// WorkspaceInvite's email-only path.
+model Policy {
+  id          String   @id @default(cuid())
+  workspaceId String
+  subjectType String
+  subjectId   String
+  ruleType    String
+  ruleJson    Json
+  priority    Int      @default(0)
+  createdAt   DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([subjectType, subjectId])
+  @@index([ruleType])
 }
 
 /// Pending workspace invitations by email. Distinct from Membership because
