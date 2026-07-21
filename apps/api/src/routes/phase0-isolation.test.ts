@@ -10,6 +10,10 @@ import {
   type WorkspaceRoleFixture,
 } from "./workspaces-rbac-fixtures.js";
 
+function parse<T>(response: { payload: string }): T {
+  return JSON.parse(response.payload) as T;
+}
+
 /**
  * Verifies the Phase 0 exit criteria from docs/roadmap.md: two orgs, each
  * with two workspaces, different roles, different router-model credentials,
@@ -56,13 +60,14 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
     // Different router-model credentials per workspace. No workspace-scoped
     // route exists to create these (onboarding.ts's POST /v1/provider-credentials
     // is flat/userId-based and unauthenticated), so seeded directly.
+    const credentialsByWorkspaceId = new Map<string, string>();
     for (const [fixture, provider] of [
       [orgAWorkspace1, "openai"],
       [orgAWorkspace2, "anthropic"],
       [orgBWorkspace1, "gemini"],
       [orgBWorkspace2, "groq"],
     ] as const) {
-      await prisma.providerCredential.create({
+      const credential = await prisma.providerCredential.create({
         data: {
           userId: fixture.userId,
           workspaceId: fixture.workspaceId,
@@ -70,20 +75,41 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
           encryptedApiKey: `placeholder-encrypted-key-for-${fixture.workspaceId}`,
         },
       });
+      credentialsByWorkspaceId.set(fixture.workspaceId, credential.id);
     }
 
-    // A budget per workspace, so spend isolation is provable, not assumed.
-    // UserBudget still tracks currentSpendUsd state, but the threshold
-    // enforcement itself now goes through a declarative "budget" Policy row
-    // (see cost-guardrail-service.ts) -- creating only the UserBudget row
-    // here would silently stop enforcing anything after that migration,
-    // since the workspace-scoped check no longer reads UserBudget.maxSpendUsd
-    // directly.
-    for (const [fixture, roleName] of [
-      [orgAWorkspace1, "Admin"],
-      [orgAWorkspace2, "Owner"],
-      [orgBWorkspace1, "Owner"],
-      [orgBWorkspace2, "Developer"],
+    // A distinct RouterConfig per workspace (BYO Router Model), using each
+    // workspace's own credential -- proves the CRUD/read surface is
+    // workspace-isolated the same way the credential itself is.
+    for (const [fixture, provider, model] of [
+      [orgAWorkspace1, "openai", "workspace-a1-model"],
+      [orgAWorkspace2, "anthropic", "workspace-a2-model"],
+      [orgBWorkspace1, "gemini", "workspace-b1-model"],
+      [orgBWorkspace2, "groq", "workspace-b2-model"],
+    ] as const) {
+      await prisma.routerConfig.create({
+        data: {
+          scopeType: "workspace",
+          scopeId: fixture.workspaceId,
+          provider,
+          model,
+          credentialId: credentialsByWorkspaceId.get(fixture.workspaceId),
+        },
+      });
+    }
+
+    // Budget, model_restriction, and cost_cap Policy rows per workspace --
+    // all three rule types are now live (see cost-guardrail-service.ts), so
+    // the exit-criteria proof needs to cover all three, not just budget.
+    // model_restriction/cost_cap values are deliberately workspace-specific
+    // (not a shared constant like the budget rows) so a dedicated test can
+    // prove a blocking rule on one workspace never leaks into blocking a
+    // different workspace's otherwise-identical request.
+    for (const [fixture, roleName, blockedModel, maxCostUsd] of [
+      [orgAWorkspace1, "Admin", "claude-3-opus", 1000],
+      [orgAWorkspace2, "Owner", "gpt-4o", 1000],
+      [orgBWorkspace1, "Owner", "claude-3-opus", 0.0000001],
+      [orgBWorkspace2, "Developer", "claude-3-opus", 1000],
     ] as const) {
       await prisma.userBudget.create({
         data: {
@@ -106,6 +132,26 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
           priority: 0,
         },
       });
+      await prisma.policy.create({
+        data: {
+          workspaceId: fixture.workspaceId,
+          subjectType: "role",
+          subjectId: role.id,
+          ruleType: "model_restriction",
+          ruleJson: { blockedModels: [blockedModel] },
+          priority: 0,
+        },
+      });
+      await prisma.policy.create({
+        data: {
+          workspaceId: fixture.workspaceId,
+          subjectType: "role",
+          subjectId: role.id,
+          ruleType: "cost_cap",
+          ruleJson: { maxCostUsd },
+          priority: 0,
+        },
+      });
     }
   });
 
@@ -113,6 +159,9 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
     await Promise.all(apps.splice(0).map(({ app: instance }) => instance.close()));
     const workspaceIds = fixtures.map((fixture) => fixture.workspaceId);
     await prisma.policy.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
+    await prisma.routerConfig.deleteMany({
+      where: { scopeType: "workspace", scopeId: { in: workspaceIds } },
+    });
     await prisma.userBudget.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
     await prisma.providerCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
     await prisma.auditEvent.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
@@ -260,5 +309,113 @@ describe("Phase 0 exit criteria: cross-tenant isolation", () => {
       });
       expect(response.statusCode).toBe(403);
     }
+  });
+
+  it("gives each workspace its own distinct RouterConfig", async () => {
+    const configs = await prisma.routerConfig.findMany({
+      where: {
+        scopeType: "workspace",
+        scopeId: {
+          in: [
+            orgAWorkspace1.workspaceId,
+            orgAWorkspace2.workspaceId,
+            orgBWorkspace1.workspaceId,
+            orgBWorkspace2.workspaceId,
+          ],
+        },
+      },
+    });
+    expect(configs).toHaveLength(4);
+    const modelsByWorkspace: Record<string, string> = Object.fromEntries(
+      configs.map((config): [string, string] => [config.scopeId, config.model]),
+    );
+    expect(modelsByWorkspace[orgAWorkspace1.workspaceId]).toBe("workspace-a1-model");
+    expect(modelsByWorkspace[orgAWorkspace2.workspaceId]).toBe("workspace-a2-model");
+    expect(modelsByWorkspace[orgBWorkspace1.workspaceId]).toBe("workspace-b1-model");
+    expect(modelsByWorkspace[orgBWorkspace2.workspaceId]).toBe("workspace-b2-model");
+    // No two workspaces share a RouterConfig row.
+    expect(new Set(configs.map((c) => c.id)).size).toBe(4);
+  });
+
+  it("does not let workspace A1's Admin read workspace B's router config", async () => {
+    // Positive control: Admin does have router.read in its own workspace.
+    const ownWorkspaceRead = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${orgAWorkspace1.workspaceId}/router-config`,
+      headers: { "x-api-key": orgAWorkspace1.apiKey },
+    });
+    expect(ownWorkspaceRead.statusCode).toBe(200);
+    expect(parse<{ model: string }>(ownWorkspaceRead).model).toBe("workspace-a1-model");
+
+    for (const target of [orgAWorkspace2, orgBWorkspace1, orgBWorkspace2]) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/workspaces/${target.workspaceId}/router-config`,
+        headers: { "x-api-key": orgAWorkspace1.apiKey },
+      });
+      expect(response.statusCode).toBe(403);
+    }
+  });
+
+  it("enforces workspace A2's model_restriction policy on its own request without leaking onto workspace A1's identical request", async () => {
+    // orgAWorkspace2's Policy blocks "gpt-4o" specifically; orgAWorkspace1's
+    // blocks an unrelated model ("claude-3-opus"). Both fixtures request the
+    // same "gpt-4o" model -- if isolation held, only A2 should be denied.
+    const allowedResponse = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "x-api-key": orgAWorkspace1.apiKey },
+      payload: {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "Hello" }],
+        cache: { mode: "disabled" },
+      },
+    });
+    expect(allowedResponse.statusCode).toBe(200);
+
+    const blockedResponse = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "x-api-key": orgAWorkspace2.apiKey },
+      payload: {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "Hello" }],
+        cache: { mode: "disabled" },
+      },
+    });
+    expect(blockedResponse.statusCode).toBe(403);
+    expect(parse<{ error: { code: string } }>(blockedResponse).error.code).toBe("MODEL_RESTRICTED");
+  });
+
+  it("enforces workspace B1's cost_cap policy on its own request without leaking onto workspace B2's identical request", async () => {
+    // orgBWorkspace1's Policy has a near-zero maxCostUsd; orgBWorkspace2's is
+    // generous. Both fixtures send the same request -- if isolation held,
+    // only B1 should be denied.
+    const blockedResponse = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "x-api-key": orgBWorkspace1.apiKey },
+      payload: {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "Hello" }],
+        cache: { mode: "disabled" },
+      },
+    });
+    expect(blockedResponse.statusCode).toBe(403);
+    expect(parse<{ error: { code: string } }>(blockedResponse).error.code).toBe(
+      "COST_CAP_EXCEEDED",
+    );
+
+    const allowedResponse = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "x-api-key": orgBWorkspace2.apiKey },
+      payload: {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "Hello" }],
+        cache: { mode: "disabled" },
+      },
+    });
+    expect(allowedResponse.statusCode).toBe(200);
   });
 });
