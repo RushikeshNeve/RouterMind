@@ -138,6 +138,7 @@ export interface ChatCompletionDependencies {
       workspaceId?: string;
       apiKeyId?: string;
       workspaceRole?: "owner" | "admin" | "developer" | "viewer";
+      requestedModel?: string;
       estimatedCostUsd: number;
       estimatedTokens: number;
       maxEstimatedCostUsd?: number;
@@ -561,6 +562,7 @@ export function registerChatCompletionRoutes(
           workspaceId: user.workspaceId,
           apiKeyId: user.apiKeyId,
           workspaceRole: user.workspaceRole,
+          requestedModel: candidate.model,
           estimatedCostUsd,
           estimatedTokens: tokenEstimate.inputTokens + tokenEstimate.outputTokens,
           maxEstimatedCostUsd: parsed.data.routing.maxEstimatedCostUsd,

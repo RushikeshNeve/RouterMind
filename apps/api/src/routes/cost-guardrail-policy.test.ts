@@ -159,4 +159,94 @@ describe("CostGuardrailService's live wiring to evaluatePolicy()", () => {
     });
     expect(allowedBudget.currentSpendUsd).toBeGreaterThan(0);
   });
+
+  it("blocks a request for a model_restriction-blocked model, with no UserBudget row at all", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const role = await prisma.role.findUniqueOrThrow({ where: { name: "Owner" } });
+
+    // Deliberately no UserBudget row for this workspace -- proves
+    // evaluatePolicy() now runs regardless of whether a budget row exists.
+    const policy = await prisma.policy.create({
+      data: {
+        workspaceId: fixture.workspaceId,
+        subjectType: "role",
+        subjectId: role.id,
+        ruleType: "model_restriction",
+        ruleJson: { blockedModels: ["gpt-4o"] },
+        priority: 0,
+      },
+    });
+    policyIds.push(policy.id);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(403);
+    const body = parse<{ error: { code: string } }>(response);
+    expect(body.error.code).toBe("MODEL_RESTRICTED");
+  });
+
+  it("allows a request for a model not named by a model_restriction rule", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const role = await prisma.role.findUniqueOrThrow({ where: { name: "Owner" } });
+
+    const policy = await prisma.policy.create({
+      data: {
+        workspaceId: fixture.workspaceId,
+        subjectType: "role",
+        subjectId: role.id,
+        ruleType: "model_restriction",
+        ruleJson: { blockedModels: ["claude-3-opus"] },
+        priority: 0,
+      },
+    });
+    policyIds.push(policy.id);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("blocks a request whose estimated cost exceeds a cost_cap rule, with no UserBudget row at all", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const role = await prisma.role.findUniqueOrThrow({ where: { name: "Owner" } });
+
+    const policy = await prisma.policy.create({
+      data: {
+        workspaceId: fixture.workspaceId,
+        subjectType: "role",
+        subjectId: role.id,
+        ruleType: "cost_cap",
+        ruleJson: { maxCostUsd: 0.0000001 },
+        priority: 0,
+      },
+    });
+    policyIds.push(policy.id);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(403);
+    const body = parse<{ error: { code: string } }>(response);
+    expect(body.error.code).toBe("COST_CAP_EXCEEDED");
+  });
+
+  it("allows a request whose estimated cost is within a cost_cap rule", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const role = await prisma.role.findUniqueOrThrow({ where: { name: "Owner" } });
+
+    const policy = await prisma.policy.create({
+      data: {
+        workspaceId: fixture.workspaceId,
+        subjectType: "role",
+        subjectId: role.id,
+        ruleType: "cost_cap",
+        ruleJson: { maxCostUsd: 1000 },
+        priority: 0,
+      },
+    });
+    policyIds.push(policy.id);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(200);
+  });
 });

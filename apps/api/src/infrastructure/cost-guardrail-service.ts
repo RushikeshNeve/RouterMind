@@ -1,11 +1,16 @@
-import type { PrismaClient } from "@prisma/client";
-import { evaluatePolicy } from "@routemind/policy-engine";
+import type { PrismaClient, UserBudget } from "@prisma/client";
+import { evaluatePolicy, type PolicyEvaluationResult } from "@routemind/policy-engine";
 
 import { PrismaPolicyRuleLookup } from "./policy-rule-lookup.js";
 
 export interface CostGuardrailCheck {
   allowed: boolean;
-  errorCode?: "BUDGET_EXCEEDED" | "QUOTA_EXCEEDED" | "REQUEST_COST_LIMIT_EXCEEDED";
+  errorCode?:
+    | "BUDGET_EXCEEDED"
+    | "QUOTA_EXCEEDED"
+    | "REQUEST_COST_LIMIT_EXCEEDED"
+    | "MODEL_RESTRICTED"
+    | "COST_CAP_EXCEEDED";
   message?: string;
   budgetRemainingUsd?: number;
   budgetUsagePercent?: number;
@@ -28,6 +33,7 @@ export class CostGuardrailService {
     workspaceId?: string;
     apiKeyId?: string;
     workspaceRole?: "owner" | "admin" | "developer" | "viewer";
+    requestedModel?: string;
     estimatedCostUsd: number;
     estimatedTokens: number;
     maxEstimatedCostUsd?: number;
@@ -52,12 +58,13 @@ export class CostGuardrailService {
       orderBy: { createdAt: "desc" },
     });
 
-    if (budget && input.workspaceId) {
-      // Workspace-scoped: the threshold now lives declaratively in Policy
-      // rows, evaluated via the policy engine -- UserBudget only tracks
-      // currentSpendUsd/resetAt state going forward for this path.
-      // UserBudget.maxSpendUsd is no longer read here; it's vestigial for
-      // workspace-scoped budgets specifically.
+    if (input.workspaceId) {
+      // Evaluated unconditionally for every workspace-scoped request, not
+      // just when a UserBudget row happens to exist -- a workspace whose
+      // only Policy rows are model_restriction/cost_cap (no budget row at
+      // all) must still get those rules evaluated. UserBudget only supplies
+      // currentSpendUsd state for "budget"-type rules here; its own
+      // maxSpendUsd column is vestigial for this path.
       let roleId: string | undefined;
       if (input.workspaceRole) {
         const role = await this.prisma.role.findUnique({
@@ -72,26 +79,15 @@ export class CostGuardrailService {
           roleId,
           userId: input.userId,
           apiKeyId: input.apiKeyId,
+          requestedModel: input.requestedModel,
           estimatedCostUsd: input.estimatedCostUsd,
-          currentSpendUsd: budget.currentSpendUsd,
+          currentSpendUsd: budget?.currentSpendUsd ?? 0,
         },
         new PrismaPolicyRuleLookup(this.prisma),
       );
 
       if (!policyResult.allow) {
-        const maxSpendUsd = (policyResult.matchedRule?.ruleJson as { maxSpendUsd?: number })
-          ?.maxSpendUsd;
-        return {
-          allowed: false,
-          errorCode: "BUDGET_EXCEEDED",
-          message: policyResult.reason,
-          budgetRemainingUsd:
-            maxSpendUsd !== undefined
-              ? Math.max(0, maxSpendUsd - budget.currentSpendUsd)
-              : undefined,
-          budgetUsagePercent:
-            maxSpendUsd !== undefined ? (budget.currentSpendUsd / maxSpendUsd) * 100 : undefined,
-        };
+        return this.buildPolicyDenial(policyResult, budget);
       }
     } else if (budget) {
       // Legacy, pre-tenancy path: a UserBudget row with no workspaceId has
@@ -157,6 +153,35 @@ export class CostGuardrailService {
         ? Math.max(0, quota.maxRequests - quota.currentRequests)
         : undefined,
       quotaRemainingTokens: quota ? Math.max(0, quota.maxTokens - quota.currentTokens) : undefined,
+    };
+  }
+
+  // Maps evaluatePolicy()'s matched rule to a caller-facing errorCode --
+  // budget/cost_cap/model_restriction are distinct enforcement mechanisms
+  // and must not all collapse into "BUDGET_EXCEEDED" (that mislabeling is
+  // what let cost_cap/model_restriction denials go unnoticed before this
+  // fix: a caller has no way to tell which policy actually fired).
+  private buildPolicyDenial(
+    policyResult: PolicyEvaluationResult,
+    budget: UserBudget | null,
+  ): CostGuardrailCheck {
+    if (policyResult.matchedRule?.ruleType === "model_restriction") {
+      return { allowed: false, errorCode: "MODEL_RESTRICTED", message: policyResult.reason };
+    }
+    if (policyResult.matchedRule?.ruleType === "cost_cap") {
+      return { allowed: false, errorCode: "COST_CAP_EXCEEDED", message: policyResult.reason };
+    }
+    const maxSpendUsd = (policyResult.matchedRule?.ruleJson as { maxSpendUsd?: number })
+      ?.maxSpendUsd;
+    const currentSpendUsd = budget?.currentSpendUsd ?? 0;
+    return {
+      allowed: false,
+      errorCode: "BUDGET_EXCEEDED",
+      message: policyResult.reason,
+      budgetRemainingUsd:
+        maxSpendUsd !== undefined ? Math.max(0, maxSpendUsd - currentSpendUsd) : undefined,
+      budgetUsagePercent:
+        maxSpendUsd !== undefined ? (currentSpendUsd / maxSpendUsd) * 100 : undefined,
     };
   }
 
