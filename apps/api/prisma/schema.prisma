@@ -451,12 +451,53 @@ model FirewallEvent {
 }
 
 model Organization {
-  id         String      @id @default(cuid())
-  name       String
-  plan       String      @default("free")
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  workspaces Workspace[]
+  id           String        @id @default(cuid())
+  name         String
+  plan         String        @default("free")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  workspaces   Workspace[]
+  subscription Subscription?
+}
+
+/// The four billing tiers (Free/Pro/Team/Enterprise) -- pricing and request
+/// limits live here so a Subscription row just references a tier instead of
+/// duplicating its numbers. Enterprise has no self-serve price (priceCents
+/// is 0 and includedRequests is null; featuresJson.contactSales flags it as
+/// custom-quoted). Phase 1 item 2 wires real Stripe billing against this;
+/// this slice is schema + seed only -- no route, no UI, no Stripe fields on
+/// Plan itself (those live on Subscription).
+model Plan {
+  id               String         @id @default(cuid())
+  name             String         @unique
+  priceCents       Int
+  includedRequests Int?
+  featuresJson     Json
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  subscriptions    Subscription[]
+}
+
+/// One active subscription per Organization (organizationId is unique --
+/// this models "a single flat subscription," not billing history). stripe*
+/// and currentPeriod* fields stay nullable until Phase 1 item 2 wires real
+/// Stripe Billing; a brand-new org has no Subscription row at all until
+/// then -- this slice does not backfill one, on purpose (schema + seed
+/// only, per the phase plan's explicit scope for this item).
+model Subscription {
+  id                   String       @id @default(cuid())
+  organizationId       String       @unique
+  planId               String
+  status               String       @default("active")
+  stripeSubscriptionId String?
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan                 Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([planId])
 }
 
 model Principal {
