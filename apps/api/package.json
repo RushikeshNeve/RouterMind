@@ -17,6 +17,7 @@
     "seed:dev": "npx --yes tsx@4.20.6 src/scripts/seed-dev.ts",
     "seed:rbac": "npx --yes tsx@4.20.6 src/scripts/seed-rbac.ts",
     "qa:phase0": "npx --yes tsx@4.20.6 src/scripts/qa-phase0-dashboard-flow.ts",
+    "qa:e2e-report": "npx --yes tsx@4.20.6 src/scripts/e2e-report-generator.ts",
     "check:orphaned-workspaces": "npx --yes tsx@4.20.6 src/scripts/find-orphaned-workspaces.ts",
     "start": "node dist/server.js"
   },
@@ -38,6 +39,7 @@
   },
   "devDependencies": {
     "dotenv-cli": "^8.0.0",
+    "playwright": "^1.61.1",
     "prisma": "^6.11.1",
     "rimraf": "^6.0.1"
   }

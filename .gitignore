@@ -11,3 +11,5 @@ coverage/
 *.log
 generated/
 .omc/
+reports/
+.playwright-mcp/
