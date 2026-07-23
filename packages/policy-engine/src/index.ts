@@ -10,8 +10,13 @@ export interface PolicyEvaluator {
   evaluate(request: AiGatewayRequest, context: GatewayRequestContext): Promise<PolicyDecision>;
 }
 
-export type PolicySubjectType = "role" | "user" | "api_key";
-export type PolicyRuleType = "model_restriction" | "cost_cap" | "budget";
+// "workspace" applies to every request in the workspace unconditionally --
+// unlike role/user/api_key, it names no further subjectId to match against
+// (see subjectMatches below). Added for plan_limit, the only rule type that
+// isn't admin-configured per subject; it's derived automatically from the
+// org's Plan, not something a workspace admin scopes to a specific role.
+export type PolicySubjectType = "role" | "user" | "api_key" | "workspace";
+export type PolicyRuleType = "model_restriction" | "cost_cap" | "budget" | "plan_limit";
 
 export interface ModelRestrictionRuleJson {
   readonly blockedModels: readonly string[];
@@ -23,6 +28,16 @@ export interface CostCapRuleJson {
 
 export interface BudgetRuleJson {
   readonly maxSpendUsd: number;
+}
+
+export interface PlanLimitRuleJson {
+  readonly maxRequests: number;
+  // Unlike budget's currentSpendUsd (passed via EvaluatePolicyContext,
+  // caller-supplied), currentRequestCount is embedded directly in the rule
+  // itself -- the same Prisma-backed lookup that already has to query the
+  // org's Plan to know maxRequests can compute usage in the same pass,
+  // so there's no need to thread a second field through the context.
+  readonly currentRequestCount: number;
 }
 
 export interface PolicyRuleRow {
@@ -68,6 +83,8 @@ function subjectMatches(rule: PolicyRuleRow, context: EvaluatePolicyContext): bo
       return context.userId !== undefined && rule.subjectId === context.userId;
     case "api_key":
       return context.apiKeyId !== undefined && rule.subjectId === context.apiKeyId;
+    case "workspace":
+      return true;
   }
 }
 
@@ -122,6 +139,20 @@ function evaluateRule(
       return {
         allow: false,
         reason: `Projected spend $${projectedSpend.toFixed(4)} exceeds the $${ruleData.maxSpendUsd.toFixed(4)} budget set by policy.`,
+        matchedRule: rule,
+      };
+    }
+    case "plan_limit": {
+      const ruleData = rule.ruleJson as Partial<PlanLimitRuleJson>;
+      if (ruleData.maxRequests === undefined || ruleData.currentRequestCount === undefined) {
+        return undefined;
+      }
+      if (ruleData.currentRequestCount < ruleData.maxRequests) {
+        return undefined;
+      }
+      return {
+        allow: false,
+        reason: `This organization has used ${ruleData.currentRequestCount} of its plan's ${ruleData.maxRequests} included requests for this billing period.`,
         matchedRule: rule,
       };
     }

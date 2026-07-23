@@ -167,6 +167,54 @@ describe("evaluatePolicy", () => {
     expect(result.matchedRule?.id).toBe("high-priority-cap");
   });
 
+  it("blocks a request once currentRequestCount reaches a plan_limit rule's maxRequests", async () => {
+    const rule = makeRule({
+      id: "org-plan-limit",
+      subjectType: "workspace",
+      subjectId: "",
+      ruleType: "plan_limit",
+      ruleJson: { maxRequests: 10_000, currentRequestCount: 10_000 },
+    });
+    const lookup = fakeLookup([rule]);
+
+    const result = await evaluatePolicy(baseContext, lookup);
+
+    expect(result.allow).toBe(false);
+    expect(result.matchedRule?.id).toBe("org-plan-limit");
+    expect(result.reason).toContain("10000");
+  });
+
+  it("allows a request when currentRequestCount is still below a plan_limit rule's maxRequests", async () => {
+    const rule = makeRule({
+      subjectType: "workspace",
+      subjectId: "",
+      ruleType: "plan_limit",
+      ruleJson: { maxRequests: 10_000, currentRequestCount: 9_999 },
+    });
+    const lookup = fakeLookup([rule]);
+
+    const result = await evaluatePolicy(baseContext, lookup);
+
+    expect(result.allow).toBe(true);
+  });
+
+  it("applies a workspace-subject rule regardless of the caller's role/user/api key", async () => {
+    const rule = makeRule({
+      subjectType: "workspace",
+      subjectId: "",
+      ruleType: "plan_limit",
+      ruleJson: { maxRequests: 5, currentRequestCount: 5 },
+    });
+    const lookup = fakeLookup([rule]);
+
+    // No roleId/userId/apiKeyId at all -- a workspace-subject rule still
+    // applies, unlike role/user/api_key rules which require a matching id.
+    const result = await evaluatePolicy({ workspaceId: "ws-1" }, lookup);
+
+    expect(result.allow).toBe(false);
+    expect(result.matchedRule?.ruleType).toBe("plan_limit");
+  });
+
   it("falls through to a lower-priority rule when the higher-priority rule doesn't apply to this request", async () => {
     const highPriorityRestriction = makeRule({
       id: "high-priority-restriction",

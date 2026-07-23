@@ -10,7 +10,8 @@ export interface CostGuardrailCheck {
     | "QUOTA_EXCEEDED"
     | "REQUEST_COST_LIMIT_EXCEEDED"
     | "MODEL_RESTRICTED"
-    | "COST_CAP_EXCEEDED";
+    | "COST_CAP_EXCEEDED"
+    | "PLAN_LIMIT_EXCEEDED";
   message?: string;
   budgetRemainingUsd?: number;
   budgetUsagePercent?: number;
@@ -170,6 +171,9 @@ export class CostGuardrailService {
     }
     if (policyResult.matchedRule?.ruleType === "cost_cap") {
       return { allowed: false, errorCode: "COST_CAP_EXCEEDED", message: policyResult.reason };
+    }
+    if (policyResult.matchedRule?.ruleType === "plan_limit") {
+      return { allowed: false, errorCode: "PLAN_LIMIT_EXCEEDED", message: policyResult.reason };
     }
     const maxSpendUsd = (policyResult.matchedRule?.ruleJson as { maxSpendUsd?: number })
       ?.maxSpendUsd;

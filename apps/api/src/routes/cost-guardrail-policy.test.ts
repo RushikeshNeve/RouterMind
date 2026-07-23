@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -19,10 +20,18 @@ describe("CostGuardrailService's live wiring to evaluatePolicy()", () => {
   const apps: Array<{ readonly app: FastifyInstance }> = [];
   const fixtures: WorkspaceRoleFixture[] = [];
   const policyIds: string[] = [];
+  const subscriptionOrgIds: string[] = [];
+  const planIds: string[] = [];
+  const requestLogIds: string[] = [];
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map(({ app }) => app.close()));
+    await prisma.requestLog.deleteMany({ where: { id: { in: requestLogIds.splice(0) } } });
     await prisma.policy.deleteMany({ where: { id: { in: policyIds.splice(0) } } });
+    await prisma.subscription.deleteMany({
+      where: { organizationId: { in: subscriptionOrgIds.splice(0) } },
+    });
+    await prisma.plan.deleteMany({ where: { id: { in: planIds.splice(0) } } });
     const workspaceIds = fixtures.map((fixture) => fixture.workspaceId);
     await prisma.userBudget.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
     await Promise.all(fixtures.splice(0).map((fixture) => cleanupFixture(prisma, fixture)));
@@ -51,6 +60,39 @@ describe("CostGuardrailService's live wiring to evaluatePolicy()", () => {
         cache: { mode: "disabled" },
       },
     });
+  }
+
+  async function createPlan(includedRequests: number | null): Promise<string> {
+    const plan = await prisma.plan.create({
+      data: {
+        name: `Plan Limit Test Plan ${randomUUID()}`,
+        priceCents: 5_900,
+        includedRequests,
+        featuresJson: {},
+      },
+    });
+    planIds.push(plan.id);
+    return plan.id;
+  }
+
+  async function subscribeOrgToPlan(organizationId: string, planId: string): Promise<void> {
+    await prisma.subscription.create({ data: { organizationId, planId, status: "active" } });
+    subscriptionOrgIds.push(organizationId);
+  }
+
+  async function seedSuccessfulRequestLogs(workspaceId: string, count: number): Promise<void> {
+    for (let i = 0; i < count; i += 1) {
+      const row = await prisma.requestLog.create({
+        data: {
+          workspaceId,
+          apiKey: "test-key-hash",
+          requestedModel: "gpt-4o",
+          latencyMs: 100,
+          status: "success",
+        },
+      });
+      requestLogIds.push(row.id);
+    }
   }
 
   it("proves the live request path is decided by evaluatePolicy(), not the legacy UserBudget.maxSpendUsd threshold", async () => {
@@ -248,5 +290,66 @@ describe("CostGuardrailService's live wiring to evaluatePolicy()", () => {
     const response = await sendChatCompletion(app, fixture.apiKey);
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it("blocks a request once the org has used all of its plan's included requests", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const planId = await createPlan(1);
+    await subscribeOrgToPlan(fixture.organizationId, planId);
+    await seedSuccessfulRequestLogs(fixture.workspaceId, 1);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(403);
+    const body = parse<{ error: { code: string } }>(response);
+    expect(body.error.code).toBe("PLAN_LIMIT_EXCEEDED");
+  });
+
+  it("allows a request when the org is still under its plan's included requests", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const planId = await createPlan(10);
+    await subscribeOrgToPlan(fixture.organizationId, planId);
+    await seedSuccessfulRequestLogs(fixture.workspaceId, 3);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("never blocks when the plan's includedRequests is null (unlimited)", async () => {
+    const { app, fixture } = await setupWorkspace("Owner");
+    const planId = await createPlan(null);
+    await subscribeOrgToPlan(fixture.organizationId, planId);
+    await seedSuccessfulRequestLogs(fixture.workspaceId, 500);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("falls back to the seeded Free plan's limit when the org has no Subscription row", async () => {
+    await prisma.plan.upsert({
+      where: { name: "Free" },
+      create: {
+        name: "Free",
+        priceCents: 0,
+        includedRequests: 2,
+        featuresJson: {},
+      },
+      update: { includedRequests: 2 },
+    });
+    const { app, fixture } = await setupWorkspace("Owner");
+    // Deliberately no Subscription row for this org at all.
+    await seedSuccessfulRequestLogs(fixture.workspaceId, 2);
+
+    const response = await sendChatCompletion(app, fixture.apiKey);
+
+    expect(response.statusCode).toBe(403);
+    const body = parse<{ error: { code: string } }>(response);
+    expect(body.error.code).toBe("PLAN_LIMIT_EXCEEDED");
+
+    // Restore Free's real seeded limit so this test doesn't leak state into
+    // whatever npm run seed:plans last set it to for other manual use.
+    await prisma.plan.update({ where: { name: "Free" }, data: { includedRequests: 10_000 } });
   });
 });
