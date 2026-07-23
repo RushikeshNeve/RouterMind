@@ -43,15 +43,41 @@ describe("billing routes", () => {
   const prisma = new PrismaClient({ datasourceUrl: testConfig.DATABASE_URL });
   const fixtures: WorkspaceRoleFixture[] = [];
   const planIds: string[] = [];
+  const requestLogIds: string[] = [];
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map((app) => app.close()));
+    await prisma.requestLog.deleteMany({ where: { id: { in: requestLogIds.splice(0) } } });
     await prisma.subscription.deleteMany({
       where: { organizationId: { in: fixtures.map((f) => f.organizationId) } },
     });
     await Promise.all(fixtures.splice(0).map((fixture) => cleanupFixture(prisma, fixture)));
     await prisma.plan.deleteMany({ where: { id: { in: planIds.splice(0) } } });
   });
+
+  async function seedRequestLog(
+    workspaceId: string,
+    input: {
+      status: "success" | "failed";
+      inputTokens?: number;
+      outputTokens?: number;
+      createdAt?: Date;
+    },
+  ): Promise<void> {
+    const row = await prisma.requestLog.create({
+      data: {
+        workspaceId,
+        apiKey: "test-key-hash",
+        requestedModel: "gpt-4o",
+        latencyMs: 100,
+        status: input.status,
+        inputTokens: input.inputTokens,
+        outputTokens: input.outputTokens,
+        ...(input.createdAt ? { createdAt: input.createdAt } : {}),
+      },
+    });
+    requestLogIds.push(row.id);
+  }
 
   async function seedPlan(paddlePriceId: string | null): Promise<{ id: string; name: string }> {
     const plan = await prisma.plan.create({
@@ -176,6 +202,132 @@ describe("billing routes", () => {
       });
 
       expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe("GET /v1/organizations/:organizationId/billing/usage-summary", () => {
+    it("counts only successful requests within the given period, for this org only", async () => {
+      const fixture = await seedWorkspaceWithRole(prisma, "Owner");
+      fixtures.push(fixture);
+      const otherFixture = await seedWorkspaceWithRole(prisma, "Owner");
+      fixtures.push(otherFixture);
+      const app = await billingTestApp();
+
+      const insidePeriod = new Date("2026-03-15T00:00:00Z");
+      const outsidePeriod = new Date("2026-04-15T00:00:00Z");
+      await seedRequestLog(fixture.workspaceId, {
+        status: "success",
+        inputTokens: 100,
+        outputTokens: 50,
+        createdAt: insidePeriod,
+      });
+      await seedRequestLog(fixture.workspaceId, {
+        status: "success",
+        inputTokens: 10,
+        outputTokens: 5,
+        createdAt: insidePeriod,
+      });
+      await seedRequestLog(fixture.workspaceId, {
+        status: "failed",
+        inputTokens: 1000,
+        outputTokens: 1000,
+        createdAt: insidePeriod,
+      });
+      await seedRequestLog(fixture.workspaceId, {
+        status: "success",
+        inputTokens: 999,
+        outputTokens: 999,
+        createdAt: outsidePeriod,
+      });
+      await seedRequestLog(otherFixture.workspaceId, {
+        status: "success",
+        inputTokens: 999,
+        outputTokens: 999,
+        createdAt: insidePeriod,
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url:
+          `/v1/organizations/${fixture.organizationId}/billing/usage-summary` +
+          `?periodStart=2026-03-01T00:00:00.000Z&periodEnd=2026-04-01T00:00:00.000Z`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        organizationId: string;
+        requestCount: number;
+        tokenCount: number;
+      };
+      expect(body.organizationId).toBe(fixture.organizationId);
+      expect(body.requestCount).toBe(2);
+      expect(body.tokenCount).toBe(100 + 50 + 10 + 5);
+    });
+
+    it("defaults to the current calendar month when no period is given and no Subscription exists", async () => {
+      const fixture = await seedWorkspaceWithRole(prisma, "Owner");
+      fixtures.push(fixture);
+      const app = await billingTestApp();
+      await seedRequestLog(fixture.workspaceId, {
+        status: "success",
+        inputTokens: 7,
+        outputTokens: 3,
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixture.organizationId}/billing/usage-summary`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { requestCount: number; tokenCount: number };
+      expect(body.requestCount).toBe(1);
+      expect(body.tokenCount).toBe(10);
+    });
+
+    it("rejects with 403 when caller lacks billing.read (Viewer)", async () => {
+      const fixture = await seedWorkspaceWithRole(prisma, "Viewer");
+      fixtures.push(fixture);
+      const app = await billingTestApp();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixture.organizationId}/billing/usage-summary`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+
+    it("allows Admin (billing.read)", async () => {
+      const fixture = await seedWorkspaceWithRole(prisma, "Admin");
+      fixtures.push(fixture);
+      const app = await billingTestApp();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixture.organizationId}/billing/usage-summary`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(200);
+    });
+
+    it("rejects a caller from a different organization", async () => {
+      const fixtureA = await seedWorkspaceWithRole(prisma, "Owner");
+      const fixtureB = await seedWorkspaceWithRole(prisma, "Owner");
+      fixtures.push(fixtureA, fixtureB);
+      const app = await billingTestApp();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixtureB.organizationId}/billing/usage-summary`,
+        headers: { "x-api-key": fixtureA.apiKey },
+      });
+
+      expect(response.statusCode).toBe(403);
     });
   });
 

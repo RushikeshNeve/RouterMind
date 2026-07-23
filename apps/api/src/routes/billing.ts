@@ -7,6 +7,10 @@ import { writeAuditEvent } from "../infrastructure/audit.js";
 import { requireOrganizationPermission } from "../infrastructure/rbac.js";
 import { PaddleApiError, type PaddleClient } from "../infrastructure/paddle-client.js";
 import { verifyPaddleWebhookSignature } from "../infrastructure/paddle-webhook.js";
+import {
+  computeUsageSummary,
+  defaultUsagePeriod,
+} from "../infrastructure/usage-summary-service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -23,6 +27,11 @@ const orgParamsSchema = z.object({
 
 const checkoutBodySchema = z.object({
   planName: z.string().min(1),
+});
+
+const usageSummaryQuerySchema = z.object({
+  periodStart: z.string().datetime().optional(),
+  periodEnd: z.string().datetime().optional(),
 });
 
 const paddleWebhookBodySchema = z.object({
@@ -120,6 +129,51 @@ export function registerBillingRoutes(
         transactionId: transaction.id,
         clientToken: config.PADDLE_CLIENT_TOKEN,
         environment: config.PADDLE_ENVIRONMENT,
+      });
+    },
+  );
+
+  app.get(
+    "/v1/organizations/:organizationId/billing/usage-summary",
+    { preHandler: requireOrganizationPermission(prisma, "billing.read", config) },
+    async (request, reply) => {
+      const params = orgParamsSchema.safeParse(request.params);
+      const query = usageSummaryQuerySchema.safeParse(request.query);
+      if (!params.success || !query.success) {
+        return validation(reply);
+      }
+      const orgContext = request.rbacOrgContext!;
+      if (orgContext.organizationId !== params.data.organizationId) {
+        return reply
+          .status(403)
+          .send({ error: { message: "Caller does not have access to this organization." } });
+      }
+
+      let periodStart: Date;
+      let periodEnd: Date;
+      if (query.data.periodStart && query.data.periodEnd) {
+        periodStart = new Date(query.data.periodStart);
+        periodEnd = new Date(query.data.periodEnd);
+      } else {
+        const subscription = await prisma.subscription.findUnique({
+          where: { organizationId: orgContext.organizationId },
+          select: { currentPeriodStart: true, currentPeriodEnd: true },
+        });
+        ({ periodStart, periodEnd } = defaultUsagePeriod(subscription));
+      }
+
+      const summary = await computeUsageSummary(prisma, {
+        organizationId: orgContext.organizationId,
+        periodStart,
+        periodEnd,
+      });
+
+      return reply.status(200).send({
+        organizationId: summary.organizationId,
+        periodStart: summary.periodStart.toISOString(),
+        periodEnd: summary.periodEnd.toISOString(),
+        requestCount: summary.requestCount,
+        tokenCount: summary.tokenCount,
       });
     },
   );
