@@ -32,6 +32,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "router.manage",
     "policy.read",
     "policy.manage",
+    "billing.manage",
   ],
 };
 

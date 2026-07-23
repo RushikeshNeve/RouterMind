@@ -92,10 +92,12 @@ import { registerInviteRoutes } from "./routes/invites.js";
 import { registerMeRoutes } from "./routes/me.js";
 import { registerProviderCredentialRoutes } from "./routes/provider-credentials.js";
 import { registerPolicyRoutes } from "./routes/policy.js";
+import { registerBillingRoutes } from "./routes/billing.js";
 import { registerRouterConfigRoutes } from "./routes/router-config.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { ConsoleEmailSender, type EmailSender } from "./infrastructure/email-sender.js";
+import { LivePaddleClient, type PaddleClient } from "./infrastructure/paddle-client.js";
 import { toSafeErrorResponse } from "./security/errors.js";
 
 export interface BuildAppOptions {
@@ -114,6 +116,7 @@ export interface BuildAppOptions {
   workspaceService?: WorkspaceService;
   prisma?: PrismaClient;
   emailSender?: EmailSender;
+  paddleClient?: PaddleClient;
   analyticsService?: AnalyticsService;
   readinessService?: ReadinessService;
   tracer?: Tracer;
@@ -255,6 +258,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerPolicyRoutes(app, {
     config: options.config,
     prisma,
+  });
+  registerBillingRoutes(app, {
+    config: options.config,
+    prisma,
+    paddleClient: options.paddleClient ?? new LivePaddleClient(options.config),
   });
   registerProviderCredentialRoutes(app, {
     config: options.config,

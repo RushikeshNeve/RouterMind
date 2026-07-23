@@ -21,6 +21,7 @@ const testConfig: ApiConfig = {
   LOG_LEVEL: "silent",
   NODE_ENV: "test",
   PORT: 3000,
+  PADDLE_ENVIRONMENT: "sandbox",
   PROVIDER_MODE: "mock",
   PROVIDER_TIMEOUT_MS: 30_000,
   ROUTER_LLM_ENABLED: false,

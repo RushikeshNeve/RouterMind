@@ -17,6 +17,10 @@ const environmentSchema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   OPENAI_API_KEY: z.string().optional(),
+  PADDLE_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+  PADDLE_API_KEY: z.string().optional(),
+  PADDLE_CLIENT_TOKEN: z.string().optional(),
+  PADDLE_WEBHOOK_SECRET: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(3000),
   PROVIDER_MODE: z.enum(["mock", "live"]).default("mock"),
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
@@ -74,6 +78,11 @@ function validateProductionConfig(config: ApiConfig): void {
     if (!hasProviderKey) {
       missing.push("at least one provider API key");
     }
+  }
+  if (config.PADDLE_ENVIRONMENT === "production") {
+    if (!config.PADDLE_API_KEY) missing.push("PADDLE_API_KEY");
+    if (!config.PADDLE_CLIENT_TOKEN) missing.push("PADDLE_CLIENT_TOKEN");
+    if (!config.PADDLE_WEBHOOK_SECRET) missing.push("PADDLE_WEBHOOK_SECRET");
   }
 
   if (missing.length > 0) {

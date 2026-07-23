@@ -473,23 +473,29 @@ model Plan {
   priceCents       Int
   includedRequests Int?
   featuresJson     Json
+  /// Paddle's price id for this tier's checkout -- null for Free (no
+  /// checkout needed) and Enterprise (contact-sales, no self-serve price).
+  paddlePriceId    String?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   subscriptions    Subscription[]
 }
 
 /// One active subscription per Organization (organizationId is unique --
-/// this models "a single flat subscription," not billing history). stripe*
-/// and currentPeriod* fields stay nullable until Phase 1 item 2 wires real
-/// Stripe Billing; a brand-new org has no Subscription row at all until
-/// then -- this slice does not backfill one, on purpose (schema + seed
-/// only, per the phase plan's explicit scope for this item).
+/// this models "a single flat subscription," not billing history). Paddle
+/// is the merchant of record: it owns tax/invoicing, so nothing here
+/// models tax or invoice line items -- the currentPeriod and paddle* fields are
+/// synced from Paddle's subscription.created/updated/canceled webhooks
+/// (Phase 1 item 2), not written directly by our own checkout flow. A
+/// brand-new org has no Subscription row at all until its first successful
+/// checkout completes.
 model Subscription {
   id                   String       @id @default(cuid())
   organizationId       String       @unique
   planId               String
   status               String       @default("active")
-  stripeSubscriptionId String?
+  paddleSubscriptionId String?
+  paddleCustomerId     String?
   currentPeriodStart   DateTime?
   currentPeriodEnd     DateTime?
   createdAt            DateTime     @default(now())
@@ -498,6 +504,7 @@ model Subscription {
   plan                 Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   @@index([planId])
+  @@index([paddleSubscriptionId])
 }
 
 model Principal {

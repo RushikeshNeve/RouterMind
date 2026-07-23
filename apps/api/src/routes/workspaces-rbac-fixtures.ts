@@ -7,6 +7,7 @@ import type { ApiConfig } from "../config.js";
 import { InMemoryAnalyticsService } from "../infrastructure/analytics-service.js";
 import { PrismaApiKeyAuthenticator } from "../infrastructure/authenticator.js";
 import { CostGuardrailService } from "../infrastructure/cost-guardrail-service.js";
+import type { PaddleClient } from "../infrastructure/paddle-client.js";
 import { InMemoryExecutionPlanLogStore } from "../infrastructure/execution-plan-log-store.js";
 import { InMemoryProviderAttemptLogStore } from "../infrastructure/provider-attempt-log-store.js";
 import { InMemoryRateLimiter } from "../infrastructure/rate-limiter.js";
@@ -30,6 +31,8 @@ export const testConfig: ApiConfig = {
   LOG_LEVEL: "silent",
   NODE_ENV: "test",
   PORT: 3000,
+  PADDLE_ENVIRONMENT: "sandbox",
+  PADDLE_WEBHOOK_SECRET: "test-paddle-webhook-secret",
   PROVIDER_MODE: "mock",
   PROVIDER_TIMEOUT_MS: 30_000,
   ROUTER_LLM_ENABLED: false,
@@ -221,7 +224,10 @@ export async function createWorkspaceTestApp(
  * rows rather than asserting budget isolation without ever calling the route
  * that's supposed to enforce it.
  */
-export async function createPrismaWorkspaceTestApp(prisma: PrismaClient) {
+export async function createPrismaWorkspaceTestApp(
+  prisma: PrismaClient,
+  options: { readonly paddleClient?: PaddleClient } = {},
+) {
   const workspaceService = new PrismaWorkspaceService(prisma);
   const authenticator = new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY);
   const provider: ProviderAdapter = {
@@ -255,6 +261,7 @@ export async function createPrismaWorkspaceTestApp(prisma: PrismaClient) {
     providers: new Map([["openai", provider]]),
     availabilityStore,
     costGuardrailService: new CostGuardrailService(prisma),
+    paddleClient: options.paddleClient,
   });
   return { app, workspaceService };
 }
