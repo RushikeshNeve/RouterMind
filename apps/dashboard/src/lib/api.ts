@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { sampleDashboardData } from "./sample-data";
+import { getActiveWorkspace } from "./workspace-client";
 import type {
   AnalyticsSummary,
   CircuitBreakerResponse,
@@ -32,6 +33,12 @@ export function useDashboardData() {
     async function load() {
       setIsLoading(true);
       try {
+        const workspace = getActiveWorkspace();
+        if (!workspace) {
+          throw new Error("No active workspace. Accept a workspace invite to get started.");
+        }
+        const w = `/v1/workspaces/${workspace.id}`;
+
         const [
           summary,
           models,
@@ -47,16 +54,16 @@ export function useDashboardData() {
           evaluationRuns,
           evaluationScores,
         ] = await Promise.all([
-          getJson<AnalyticsSummary>("/v1/analytics/summary"),
-          getJson<{ models: readonly ModelAnalytics[] }>("/v1/analytics/models"),
-          getJson<{ providers: readonly ProviderAnalytics[] }>("/v1/analytics/providers"),
-          getJson<{ errors: readonly ErrorAnalytics[] }>("/v1/analytics/errors"),
-          getJson<{ costs: readonly CostPoint[] }>("/v1/analytics/costs"),
-          getJson<{ latency: readonly LatencyPoint[] }>("/v1/analytics/latency"),
+          getJson<AnalyticsSummary>(`${w}/analytics/summary`),
+          getJson<{ models: readonly ModelAnalytics[] }>(`${w}/analytics/models`),
+          getJson<{ providers: readonly ProviderAnalytics[] }>(`${w}/analytics/providers`),
+          getJson<{ errors: readonly ErrorAnalytics[] }>(`${w}/analytics/errors`),
+          getJson<{ costs: readonly CostPoint[] }>(`${w}/analytics/costs`),
+          getJson<{ latency: readonly LatencyPoint[] }>(`${w}/analytics/latency`),
           getJson<ProviderHealthResponse>("/v1/health/providers"),
           getJson<CircuitBreakerResponse>("/v1/resilience/circuit-breakers"),
-          getJson<ProviderAttemptsResponse>("/v1/resilience/provider-attempts?limit=50"),
-          getJson<RecentRequestsResponse>("/v1/analytics/requests?limit=50"),
+          getJson<ProviderAttemptsResponse>(`${w}/resilience/provider-attempts?limit=50`),
+          getJson<RecentRequestsResponse>(`${w}/analytics/requests?limit=50`),
           getJson<{ datasets: readonly EvaluationDataset[] }>("/v1/evaluations/datasets"),
           getJson<{ runs: readonly EvaluationRun[] }>("/v1/evaluations/runs"),
           getJson<{ scores: readonly EvaluationScore[] }>("/v1/evaluations/scores"),
@@ -109,6 +116,7 @@ export function useDashboardData() {
 async function getJson<TValue>(path: string): Promise<TValue> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     headers: { accept: "application/json" },
+    credentials: "include",
   });
 
   if (!response.ok) {

@@ -192,34 +192,10 @@ describe("workspace routes", () => {
     );
   });
 
-  it("filters analytics by workspaceId", async () => {
-    const context = await createWorkspaceTestApp();
-    apps.push(context);
-    await context.requestLogStore.create({
-      workspaceId: "workspace-a",
-      apiKey: "a",
-      requestedModel: "auto",
-      selectedModel: "gpt-4o",
-      provider: "openai",
-      latencyMs: 10,
-      status: "success",
-    });
-    await context.requestLogStore.create({
-      workspaceId: "workspace-b",
-      apiKey: "b",
-      requestedModel: "auto",
-      selectedModel: "gpt-4o",
-      provider: "openai",
-      latencyMs: 10,
-      status: "success",
-    });
-
-    const response = await context.app.inject({
-      method: "GET",
-      url: "/v1/analytics/summary?workspaceId=workspace-a",
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(parse<{ requests: { total: number } }>(response).requests.total).toBe(1);
-  });
+  // The unscoped GET /v1/analytics/summary?workspaceId= route this test used
+  // to exercise no longer exists -- analytics is now served from
+  // /v1/workspaces/:workspaceId/analytics/* (RBAC-gated, workspaceId derived
+  // from the validated path param, not a query string). Coverage for
+  // workspace-scoped analytics filtering, including cross-workspace
+  // isolation, now lives in analytics.test.ts.
 });

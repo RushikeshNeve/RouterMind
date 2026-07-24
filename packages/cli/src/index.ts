@@ -192,12 +192,13 @@ export function createProgram(dependencies: CliDependencies = {}): Command {
 
   program
     .command("analytics")
-    .description("show usage analytics summary")
-    .action(async () => {
+    .description("show usage analytics summary for a workspace")
+    .requiredOption("--workspace <workspaceId>", "workspace id to query")
+    .action(async (options: { readonly workspace: string }) => {
       const globals = getGlobalOptions(program);
       const client = await buildClient(globals, configPath, createClient);
       const response = await withSpinner(globals, spinnerFactory, "Loading analytics...", () =>
-        client.analytics.summary(),
+        client.analytics.summary(options.workspace),
       );
 
       writeOutput(stdout, globals.json ? response : formatAnalytics(response));
@@ -218,12 +219,13 @@ export function createProgram(dependencies: CliDependencies = {}): Command {
 
   program
     .command("costs")
-    .description("show cost summary")
-    .action(async () => {
+    .description("show cost summary for a workspace")
+    .requiredOption("--workspace <workspaceId>", "workspace id to query")
+    .action(async (options: { readonly workspace: string }) => {
       const globals = getGlobalOptions(program);
       const client = await buildClient(globals, configPath, createClient);
       const response = await withSpinner(globals, spinnerFactory, "Loading costs...", () =>
-        client.analytics.summary(),
+        client.analytics.summary(options.workspace),
       );
 
       writeOutput(stdout, globals.json ? response : formatCosts(response));

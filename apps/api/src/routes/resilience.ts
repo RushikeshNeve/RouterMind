@@ -1,8 +1,11 @@
+import type { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
+import type { ApiConfig } from "../config.js";
 import type { CircuitBreakerService } from "../infrastructure/circuit-breaker-service.js";
 import type { ProviderAttemptLogStore } from "../infrastructure/provider-attempt-log-store.js";
+import { ensureSameWorkspace, requirePermission } from "../infrastructure/rbac.js";
 
 const providerParamsSchema = z.object({
   provider: z.string().min(1),
@@ -11,6 +14,10 @@ const providerParamsSchema = z.object({
 const providerModelParamsSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
+});
+
+const workspaceParamsSchema = z.object({
+  workspaceId: z.string().min(1),
 });
 
 const attemptQuerySchema = z.object({
@@ -24,6 +31,8 @@ const attemptQuerySchema = z.object({
 export function registerResilienceRoutes(
   app: FastifyInstance,
   dependencies: {
+    readonly config: ApiConfig;
+    readonly prisma: PrismaClient;
     readonly circuitBreakerService: CircuitBreakerService;
     readonly providerAttemptLogStore: ProviderAttemptLogStore;
   },
@@ -61,15 +70,30 @@ export function registerResilienceRoutes(
     return { circuitBreaker: serializeCircuitBreaker(circuitBreaker) };
   });
 
-  app.get("/v1/resilience/provider-attempts", async (request, reply) => {
-    const query = attemptQuerySchema.safeParse(request.query);
-    if (!query.success) {
-      return reply.status(400).send({ error: { message: "Invalid provider attempt filters." } });
-    }
+  // Workspace-scoped: ProviderAttemptLog carries real per-tenant request
+  // data, same class of endpoint as /v1/workspaces/:workspaceId/analytics/*
+  // (unlike circuit-breakers/health above, which are platform-wide
+  // operational state with no tenant dimension to violate).
+  app.get(
+    "/v1/workspaces/:workspaceId/resilience/provider-attempts",
+    { preHandler: requirePermission(dependencies.prisma, "analytics.read", dependencies.config) },
+    async (request, reply) => {
+      const params = workspaceParamsSchema.safeParse(request.params);
+      const query = attemptQuerySchema.safeParse(request.query);
+      if (!params.success || !query.success) {
+        return reply.status(400).send({ error: { message: "Invalid provider attempt filters." } });
+      }
+      if (!ensureSameWorkspace(request, params.data.workspaceId, reply)) {
+        return reply;
+      }
 
-    const attempts = await dependencies.providerAttemptLogStore.list(query.data);
-    return { attempts: attempts.map(serializeAttemptLog) };
-  });
+      const attempts = await dependencies.providerAttemptLogStore.list({
+        ...query.data,
+        workspaceId: params.data.workspaceId,
+      });
+      return { attempts: attempts.map(serializeAttemptLog) };
+    },
+  );
 }
 
 function serializeCircuitBreaker(state: Awaited<ReturnType<CircuitBreakerService["getState"]>>) {

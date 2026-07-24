@@ -243,7 +243,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (!analyticsService) {
     throw new Error("analyticsService is required when custom log stores are provided.");
   }
-  registerAnalyticsRoutes(app, analyticsService);
+  registerAnalyticsRoutes(app, { config: options.config, prisma, analyticsService });
   registerCacheRoutes(app, cacheService);
   registerEvaluationRoutes(app, evaluationService);
   registerFirewallRoutes(app, promptFirewallService);
@@ -292,6 +292,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   registerProviderHealthRoutes(app, providerHealthService);
   registerResilienceRoutes(app, {
+    config: options.config,
+    prisma,
     circuitBreakerService,
     providerAttemptLogStore,
   });

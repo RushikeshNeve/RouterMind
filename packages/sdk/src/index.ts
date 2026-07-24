@@ -457,6 +457,7 @@ export class RouteMind {
 
   readonly analytics: {
     readonly summary: (
+      workspaceId: string,
       filters?: AnalyticsFilters,
       options?: RequestOptions,
     ) => Promise<AnalyticsSummary>;
@@ -541,8 +542,8 @@ export class RouteMind {
     };
 
     this.analytics = {
-      summary: (filters, requestOptions) =>
-        this.request<AnalyticsSummary>("/v1/analytics/summary", {
+      summary: (workspaceId, filters, requestOptions) =>
+        this.request<AnalyticsSummary>(`/v1/workspaces/${workspaceId}/analytics/summary`, {
           method: "GET",
           query: serializeFilters(filters),
           options: requestOptions,

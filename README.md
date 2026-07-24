@@ -342,20 +342,20 @@ More examples are available in [packages/cli/README.md](./packages/cli/README.md
 
 ## API Reference
 
-| Method | Endpoint                   | Purpose                                                                                                            |
-| ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `GET`  | `/health`                  | Liveness check                                                                                                     |
-| `GET`  | `/ready`                   | Readiness check for runtime dependencies                                                                           |
-| `GET`  | `/v1/models`               | List public or authenticated model access                                                                          |
-| `POST` | `/v1/chat/completions`     | OpenAI-compatible chat completions                                                                                 |
-| `POST` | `/v1/users`                | Create a user (no auth -- true bootstrap step)                                                                     |
-| `POST` | `/v1/api-keys`             | Create a RouteMind API key (no auth for a user's first key; an existing key of theirs is required to mint another) |
-| `POST` | `/v1/provider-credentials` | Store encrypted provider credentials (requires the target user's own API key)                                      |
-| `POST` | `/v1/model-access`         | Enable or disable model access (requires the target user's own API key)                                            |
-| `GET`  | `/v1/health/providers`     | Provider and model health                                                                                          |
-| `GET`  | `/v1/analytics/summary`    | Usage, spend, latency, routing, guardrail, cache, and firewall summary                                             |
-| `GET`  | `/v1/cache/stats`          | Cache hit, miss, and savings stats                                                                                 |
-| `GET`  | `/v1/firewall/events`      | Prompt firewall event log                                                                                          |
+| Method | Endpoint                                        | Purpose                                                                                                            |
+| ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/health`                                       | Liveness check                                                                                                     |
+| `GET`  | `/ready`                                        | Readiness check for runtime dependencies                                                                           |
+| `GET`  | `/v1/models`                                    | List public or authenticated model access                                                                          |
+| `POST` | `/v1/chat/completions`                          | OpenAI-compatible chat completions                                                                                 |
+| `POST` | `/v1/users`                                     | Create a user (no auth -- true bootstrap step)                                                                     |
+| `POST` | `/v1/api-keys`                                  | Create a RouteMind API key (no auth for a user's first key; an existing key of theirs is required to mint another) |
+| `POST` | `/v1/provider-credentials`                      | Store encrypted provider credentials (requires the target user's own API key)                                      |
+| `POST` | `/v1/model-access`                              | Enable or disable model access (requires the target user's own API key)                                            |
+| `GET`  | `/v1/health/providers`                          | Provider and model health                                                                                          |
+| `GET`  | `/v1/workspaces/:workspaceId/analytics/summary` | Usage, spend, latency, routing, guardrail, cache, and firewall summary for the caller's own workspace              |
+| `GET`  | `/v1/cache/stats`                               | Cache hit, miss, and savings stats                                                                                 |
+| `GET`  | `/v1/firewall/events`                           | Prompt firewall event log                                                                                          |
 
 Additional implemented routes include analytics breakdowns, cache entries, firewall rules, workspaces, evaluations, resilience circuit breakers, and provider attempts.
 

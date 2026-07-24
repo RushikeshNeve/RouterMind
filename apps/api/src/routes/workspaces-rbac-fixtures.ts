@@ -226,7 +226,13 @@ export async function createWorkspaceTestApp(
  */
 export async function createPrismaWorkspaceTestApp(
   prisma: PrismaClient,
-  options: { readonly paddleClient?: PaddleClient } = {},
+  options: {
+    readonly paddleClient?: PaddleClient;
+    readonly requestLogStore?: InMemoryRequestLogStore;
+    readonly routerDecisionLogStore?: InMemoryRouterDecisionLogStore;
+    readonly providerAttemptLogStore?: InMemoryProviderAttemptLogStore;
+    readonly executionPlanLogStore?: InMemoryExecutionPlanLogStore;
+  } = {},
 ) {
   const workspaceService = new PrismaWorkspaceService(prisma);
   const authenticator = new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY);
@@ -262,6 +268,10 @@ export async function createPrismaWorkspaceTestApp(
     availabilityStore,
     costGuardrailService: new CostGuardrailService(prisma),
     paddleClient: options.paddleClient,
+    requestLogStore: options.requestLogStore,
+    routerDecisionLogStore: options.routerDecisionLogStore,
+    providerAttemptLogStore: options.providerAttemptLogStore,
+    executionPlanLogStore: options.executionPlanLogStore,
   });
   return { app, workspaceService };
 }

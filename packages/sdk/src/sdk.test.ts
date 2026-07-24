@@ -47,7 +47,7 @@ describe("RouteMind SDK", () => {
     const fetchMock = mockFetch({ error: { message: "Too many requests." } }, 429);
     const client = new RouteMind({ apiKey: "dev-key", fetch: fetchMock, maxRetries: 0 });
 
-    await expect(client.analytics.summary()).rejects.toBeInstanceOf(RateLimitError);
+    await expect(client.analytics.summary("workspace-1")).rejects.toBeInstanceOf(RateLimitError);
   });
 
   it("maps budget exceeded errors", async () => {
@@ -79,7 +79,7 @@ describe("RouteMind SDK", () => {
       fetch: fetchMock,
     });
 
-    await expect(client.analytics.summary()).rejects.toBeInstanceOf(NetworkError);
+    await expect(client.analytics.summary("workspace-1")).rejects.toBeInstanceOf(NetworkError);
   });
 
   it("supports custom baseUrl", async () => {
@@ -106,7 +106,7 @@ describe("RouteMind SDK", () => {
       headers: { "x-workspace-id": "workspace-1" },
     });
 
-    await client.analytics.summary();
+    await client.analytics.summary("workspace-1");
 
     expect(readHeader(firstFetchCall(fetchMock)[1], "x-workspace-id")).toBe("workspace-1");
   });
@@ -119,7 +119,7 @@ describe("RouteMind SDK", () => {
       requestId: () => "req_sdk_123",
     });
 
-    await client.analytics.summary();
+    await client.analytics.summary("workspace-1");
 
     expect(readHeader(firstFetchCall(fetchMock)[1], "x-request-id")).toBe("req_sdk_123");
   });
@@ -129,14 +129,14 @@ describe("RouteMind SDK", () => {
     const fetchMock = mockFetch(body);
     const client = new RouteMind({ apiKey: "dev-key", fetch: fetchMock });
 
-    const response = await client.analytics.summary({
+    const response = await client.analytics.summary("workspace-1", {
       userId: "user-1",
       from: new Date("2026-07-07T00:00:00.000Z"),
       to: "2026-07-07T23:59:59.999Z",
     });
 
     expect(firstFetchCall(fetchMock)[0]).toContain(
-      "/v1/analytics/summary?userId=user-1&from=2026-07-07T00%3A00%3A00.000Z&to=2026-07-07T23%3A59%3A59.999Z",
+      "/v1/workspaces/workspace-1/analytics/summary?userId=user-1&from=2026-07-07T00%3A00%3A00.000Z&to=2026-07-07T23%3A59%3A59.999Z",
     );
     expect(response.requests.total).toBe(100);
   });
