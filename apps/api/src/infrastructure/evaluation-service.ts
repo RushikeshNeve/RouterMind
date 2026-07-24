@@ -8,6 +8,7 @@ export type EvaluationScoringMode = "exact_match" | "contains" | "llm_judge";
 
 export interface EvaluationDataset {
   readonly id: string;
+  readonly workspaceId: string;
   readonly name: string;
   readonly description?: string;
   readonly taskType: string;
@@ -28,6 +29,7 @@ export interface EvaluationCase {
 
 export interface EvaluationRun {
   readonly id: string;
+  readonly workspaceId: string;
   readonly datasetId: string;
   readonly model: string;
   readonly provider: string;
@@ -70,40 +72,57 @@ export interface EvaluationModelRunner {
   }): Promise<ProviderResponse>;
 }
 
+// Dataset/run "not found" errors are deliberately identical whether the id
+// doesn't exist at all or belongs to a different workspace -- same
+// ownership-can't-be-probed pattern as PATCH provider-credentials/:id --
+// so every method below takes workspaceId, not just the top-level
+// list/create ones.
 export interface EvaluationService {
   createDataset(input: {
+    readonly workspaceId: string;
     readonly name: string;
     readonly description?: string;
     readonly taskType: string;
   }): Promise<EvaluationDataset>;
-  listDatasets(): Promise<readonly EvaluationDataset[]>;
+  listDatasets(workspaceId: string): Promise<readonly EvaluationDataset[]>;
   addCase(input: {
+    readonly workspaceId: string;
     readonly datasetId: string;
     readonly inputMessagesJson: readonly ChatMessage[];
     readonly expectedOutput: string;
     readonly gradingRubric: EvaluationScoringMode;
     readonly metadataJson?: Record<string, unknown>;
   }): Promise<EvaluationCase>;
-  listCases(datasetId: string): Promise<readonly EvaluationCase[]>;
+  listCases(workspaceId: string, datasetId: string): Promise<readonly EvaluationCase[]>;
   createRun(input: {
+    readonly workspaceId: string;
     readonly datasetId: string;
     readonly provider: string;
     readonly model: string;
   }): Promise<EvaluationRun>;
-  listRuns(): Promise<readonly EvaluationRun[]>;
-  getRun(runId: string): Promise<
+  listRuns(workspaceId: string): Promise<readonly EvaluationRun[]>;
+  getRun(
+    workspaceId: string,
+    runId: string,
+  ): Promise<
     | {
         readonly run: EvaluationRun;
         readonly results: readonly EvaluationResult[];
       }
     | undefined
   >;
-  startRun(runId: string): Promise<{
+  startRun(
+    workspaceId: string,
+    runId: string,
+  ): Promise<{
     readonly run: EvaluationRun;
     readonly results: readonly EvaluationResult[];
   }>;
-  scores(): Promise<readonly EvaluationScore[]>;
-  routingScores(): Promise<readonly ModelEvaluationScore[]>;
+  scores(workspaceId: string): Promise<readonly EvaluationScore[]>;
+  // Optional: the legacy dev-key /v1/chat/completions path (predates
+  // workspaces entirely) has no workspaceId to pass -- returns [] rather
+  // than mixing in every workspace's evaluation data for that caller.
+  routingScores(workspaceId?: string): Promise<readonly ModelEvaluationScore[]>;
 }
 
 export class InMemoryEvaluationService implements EvaluationService {
@@ -115,6 +134,7 @@ export class InMemoryEvaluationService implements EvaluationService {
   constructor(private readonly modelRunner: EvaluationModelRunner) {}
 
   createDataset(input: {
+    readonly workspaceId: string;
     readonly name: string;
     readonly description?: string;
     readonly taskType: string;
@@ -122,6 +142,7 @@ export class InMemoryEvaluationService implements EvaluationService {
     const now = new Date();
     const dataset: EvaluationDataset = {
       id: `eval_dataset_${this.datasets.length + 1}`,
+      workspaceId: input.workspaceId,
       name: input.name,
       description: input.description,
       taskType: input.taskType,
@@ -133,18 +154,19 @@ export class InMemoryEvaluationService implements EvaluationService {
     return Promise.resolve(dataset);
   }
 
-  listDatasets(): Promise<readonly EvaluationDataset[]> {
-    return Promise.resolve([...this.datasets]);
+  listDatasets(workspaceId: string): Promise<readonly EvaluationDataset[]> {
+    return Promise.resolve(this.datasets.filter((item) => item.workspaceId === workspaceId));
   }
 
   addCase(input: {
+    readonly workspaceId: string;
     readonly datasetId: string;
     readonly inputMessagesJson: readonly ChatMessage[];
     readonly expectedOutput: string;
     readonly gradingRubric: EvaluationScoringMode;
     readonly metadataJson?: Record<string, unknown>;
   }): Promise<EvaluationCase> {
-    this.assertDataset(input.datasetId);
+    this.assertDataset(input.workspaceId, input.datasetId);
     const now = new Date();
     const evaluationCase: EvaluationCase = {
       id: `eval_case_${this.cases.length + 1}`,
@@ -161,19 +183,21 @@ export class InMemoryEvaluationService implements EvaluationService {
     return Promise.resolve(evaluationCase);
   }
 
-  listCases(datasetId: string): Promise<readonly EvaluationCase[]> {
-    this.assertDataset(datasetId);
+  listCases(workspaceId: string, datasetId: string): Promise<readonly EvaluationCase[]> {
+    this.assertDataset(workspaceId, datasetId);
     return Promise.resolve(this.cases.filter((item) => item.datasetId === datasetId));
   }
 
   createRun(input: {
+    readonly workspaceId: string;
     readonly datasetId: string;
     readonly provider: string;
     readonly model: string;
   }): Promise<EvaluationRun> {
-    this.assertDataset(input.datasetId);
+    this.assertDataset(input.workspaceId, input.datasetId);
     const run: EvaluationRun = {
       id: `eval_run_${this.runs.length + 1}`,
+      workspaceId: input.workspaceId,
       datasetId: input.datasetId,
       model: input.model,
       provider: input.provider,
@@ -188,20 +212,25 @@ export class InMemoryEvaluationService implements EvaluationService {
     return Promise.resolve(run);
   }
 
-  listRuns(): Promise<readonly EvaluationRun[]> {
+  listRuns(workspaceId: string): Promise<readonly EvaluationRun[]> {
     return Promise.resolve(
-      [...this.runs].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      this.runs
+        .filter((item) => item.workspaceId === workspaceId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
     );
   }
 
-  getRun(runId: string): Promise<
+  getRun(
+    workspaceId: string,
+    runId: string,
+  ): Promise<
     | {
         readonly run: EvaluationRun;
         readonly results: readonly EvaluationResult[];
       }
     | undefined
   > {
-    const run = this.runs.find((item) => item.id === runId);
+    const run = this.runs.find((item) => item.id === runId && item.workspaceId === workspaceId);
     if (!run) {
       return Promise.resolve(undefined);
     }
@@ -212,14 +241,14 @@ export class InMemoryEvaluationService implements EvaluationService {
     });
   }
 
-  async startRun(runId: string): Promise<{
+  async startRun(
+    workspaceId: string,
+    runId: string,
+  ): Promise<{
     readonly run: EvaluationRun;
     readonly results: readonly EvaluationResult[];
   }> {
-    const run = this.runs.find((item) => item.id === runId);
-    if (!run) {
-      throw new Error("Evaluation run not found.");
-    }
+    const run = this.assertRun(workspaceId, runId);
 
     const startedRun = this.replaceRun(run.id, {
       ...run,
@@ -288,8 +317,10 @@ export class InMemoryEvaluationService implements EvaluationService {
     }
   }
 
-  scores(): Promise<readonly EvaluationScore[]> {
-    const completedRuns = this.runs.filter((run) => run.status === "completed");
+  scores(workspaceId: string): Promise<readonly EvaluationScore[]> {
+    const completedRuns = this.runs.filter(
+      (run) => run.status === "completed" && run.workspaceId === workspaceId,
+    );
     const grouped = new Map<string, EvaluationScore & { readonly totalScore: number }>();
 
     for (const run of completedRuns) {
@@ -325,17 +356,29 @@ export class InMemoryEvaluationService implements EvaluationService {
     );
   }
 
-  async routingScores(): Promise<readonly ModelEvaluationScore[]> {
-    return (await this.scores()).map((score) => ({
+  async routingScores(workspaceId?: string): Promise<readonly ModelEvaluationScore[]> {
+    if (!workspaceId) {
+      return [];
+    }
+
+    return (await this.scores(workspaceId)).map((score) => ({
       model: score.model,
       score: score.averageScore,
     }));
   }
 
-  private assertDataset(datasetId: string): void {
-    if (!this.datasets.some((item) => item.id === datasetId)) {
+  private assertDataset(workspaceId: string, datasetId: string): void {
+    if (!this.datasets.some((item) => item.id === datasetId && item.workspaceId === workspaceId)) {
       throw new Error("Evaluation dataset not found.");
     }
+  }
+
+  private assertRun(workspaceId: string, runId: string): EvaluationRun {
+    const run = this.runs.find((item) => item.id === runId && item.workspaceId === workspaceId);
+    if (!run) {
+      throw new Error("Evaluation run not found.");
+    }
+    return run;
   }
 
   private replaceRun(runId: string, next: EvaluationRun): EvaluationRun {

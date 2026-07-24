@@ -64,9 +64,9 @@ export function useDashboardData() {
           getJson<CircuitBreakerResponse>("/v1/resilience/circuit-breakers"),
           getJson<ProviderAttemptsResponse>(`${w}/resilience/provider-attempts?limit=50`),
           getJson<RecentRequestsResponse>(`${w}/analytics/requests?limit=50`),
-          getJson<{ datasets: readonly EvaluationDataset[] }>("/v1/evaluations/datasets"),
-          getJson<{ runs: readonly EvaluationRun[] }>("/v1/evaluations/runs"),
-          getJson<{ scores: readonly EvaluationScore[] }>("/v1/evaluations/scores"),
+          getJson<{ datasets: readonly EvaluationDataset[] }>(`${w}/evaluations/datasets`),
+          getJson<{ runs: readonly EvaluationRun[] }>(`${w}/evaluations/runs`),
+          getJson<{ scores: readonly EvaluationScore[] }>(`${w}/evaluations/scores`),
         ]);
 
         if (!isMounted) return;

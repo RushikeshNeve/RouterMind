@@ -7,6 +7,7 @@ import type { ApiConfig } from "../config.js";
 import { InMemoryAnalyticsService } from "../infrastructure/analytics-service.js";
 import { PrismaApiKeyAuthenticator } from "../infrastructure/authenticator.js";
 import { CostGuardrailService } from "../infrastructure/cost-guardrail-service.js";
+import type { EvaluationService } from "../infrastructure/evaluation-service.js";
 import type { PaddleClient } from "../infrastructure/paddle-client.js";
 import { InMemoryExecutionPlanLogStore } from "../infrastructure/execution-plan-log-store.js";
 import { InMemoryProviderAttemptLogStore } from "../infrastructure/provider-attempt-log-store.js";
@@ -232,6 +233,8 @@ export async function createPrismaWorkspaceTestApp(
     readonly routerDecisionLogStore?: InMemoryRouterDecisionLogStore;
     readonly providerAttemptLogStore?: InMemoryProviderAttemptLogStore;
     readonly executionPlanLogStore?: InMemoryExecutionPlanLogStore;
+    readonly evaluationService?: EvaluationService;
+    readonly routerLLMServiceFactory?: Parameters<typeof buildApp>[0]["routerLLMServiceFactory"];
   } = {},
 ) {
   const workspaceService = new PrismaWorkspaceService(prisma);
@@ -272,6 +275,8 @@ export async function createPrismaWorkspaceTestApp(
     routerDecisionLogStore: options.routerDecisionLogStore,
     providerAttemptLogStore: options.providerAttemptLogStore,
     executionPlanLogStore: options.executionPlanLogStore,
+    evaluationService: options.evaluationService,
+    routerLLMServiceFactory: options.routerLLMServiceFactory,
   });
   return { app, workspaceService };
 }

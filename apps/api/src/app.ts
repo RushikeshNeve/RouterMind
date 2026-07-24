@@ -245,7 +245,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   registerAnalyticsRoutes(app, { config: options.config, prisma, analyticsService });
   registerCacheRoutes(app, cacheService);
-  registerEvaluationRoutes(app, evaluationService);
+  registerEvaluationRoutes(app, { config: options.config, prisma, evaluationService });
   registerFirewallRoutes(app, promptFirewallService);
   registerWorkspaceRoutes(app, {
     config: options.config,

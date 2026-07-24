@@ -424,7 +424,7 @@ export function registerChatCompletionRoutes(
           allowUnhealthyProviders: parsed.data.routing.allowUnhealthyProviders,
         },
         liveMetrics,
-        evaluationScores: await dependencies.evaluationService.routingScores(),
+        evaluationScores: await dependencies.evaluationService.routingScores(user.workspaceId),
         approximateInputTokens: tokenEstimate.inputTokens,
         routerLLMEnabled: dependencies.config.ROUTER_LLM_ENABLED,
         routerLLMService: dependencies.routerLLMServiceFactory(providers, {
