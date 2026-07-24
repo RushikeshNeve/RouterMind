@@ -20,7 +20,8 @@ export type AuditAction =
   | "policy.create"
   | "policy.update"
   | "policy.delete"
-  | "billing.checkout_initiated";
+  | "billing.checkout_initiated"
+  | "models.discover";
 
 export type AuditTargetType =
   | "Workspace"
@@ -32,7 +33,8 @@ export type AuditTargetType =
   | "ProviderCredential"
   | "UserModelAccess"
   | "Policy"
-  | "PaddleTransaction";
+  | "PaddleTransaction"
+  | "ModelCatalog";
 
 export interface AuditEventInput {
   readonly workspaceId: string;

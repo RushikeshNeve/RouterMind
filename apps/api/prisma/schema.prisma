@@ -467,6 +467,23 @@ model Organization {
 /// custom-quoted). Phase 1 item 2 wires real Stripe billing against this;
 /// this slice is schema + seed only -- no route, no UI, no Stripe fields on
 /// Plan itself (those live on Subscription).
+/// Platform-level cache of what each provider's API reports as available --
+/// no workspaceId, same category as Plan. capabilitiesJson/pricingJson are
+/// often empty: providers' list-models endpoints return little beyond a
+/// model id (see packages/providers' static modelRegistry for the richer,
+/// hand-curated capability data used elsewhere); this table records what
+/// discovery actually found, not a promise of full metadata.
+model ModelCatalog {
+  id               String   @id @default(cuid())
+  provider         String
+  model            String
+  capabilitiesJson Json
+  pricingJson      Json
+  lastSyncedAt     DateTime @default(now())
+
+  @@unique([provider, model])
+}
+
 model Plan {
   id               String         @id @default(cuid())
   name             String         @unique

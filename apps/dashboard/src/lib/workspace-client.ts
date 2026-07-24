@@ -443,6 +443,39 @@ export function getBillingOverview(organizationId: string): Promise<BillingOverv
   return requestJson(`/v1/organizations/${organizationId}/billing/overview`);
 }
 
+export interface ModelCatalogEntry {
+  readonly provider: string;
+  readonly model: string;
+  readonly capabilitiesJson: Record<string, unknown>;
+  readonly pricingJson: Record<string, unknown>;
+  readonly lastSyncedAt: string;
+}
+
+export interface DiscoverModelsResult {
+  readonly provider: string;
+  readonly discovered: readonly string[];
+  readonly count: number;
+}
+
+export function discoverModels(
+  workspaceId: string,
+  provider: string,
+): Promise<DiscoverModelsResult> {
+  return requestJson(`/v1/workspaces/${workspaceId}/models/discover`, {
+    method: "POST",
+    body: { provider },
+  });
+}
+
+// Public, unauthenticated -- platform-level reference data, same category as listPlans().
+export function listModelCatalog(
+  provider?: string,
+): Promise<{ models: readonly ModelCatalogEntry[] }> {
+  return requestJson(
+    `/v1/models/catalog${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
+  );
+}
+
 export function createBillingCheckout(
   organizationId: string,
   planName: string,

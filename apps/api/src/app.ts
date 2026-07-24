@@ -98,6 +98,10 @@ import { registerRouterConfigRoutes } from "./routes/router-config.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { ConsoleEmailSender, type EmailSender } from "./infrastructure/email-sender.js";
+import {
+  LiveModelDiscoveryClient,
+  type ModelDiscoveryClient,
+} from "./infrastructure/model-discovery-client.js";
 import { LivePaddleClient, type PaddleClient } from "./infrastructure/paddle-client.js";
 import { toSafeErrorResponse } from "./security/errors.js";
 
@@ -118,6 +122,7 @@ export interface BuildAppOptions {
   prisma?: PrismaClient;
   emailSender?: EmailSender;
   paddleClient?: PaddleClient;
+  modelDiscoveryClient?: ModelDiscoveryClient;
   analyticsService?: AnalyticsService;
   readinessService?: ReadinessService;
   tracer?: Tracer;
@@ -304,6 +309,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerModelRoutes(app, {
     authenticator,
     availabilityStore,
+    config: options.config,
+    prisma,
+    modelDiscoveryClient: options.modelDiscoveryClient ?? new LiveModelDiscoveryClient(),
   });
   const providerFactory = (apiKeys: Parameters<typeof createProviderRegistry>[0]["apiKeys"]) =>
     createProviderRegistry({
