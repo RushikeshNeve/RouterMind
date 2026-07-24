@@ -8,6 +8,7 @@ import {
   Boxes,
   BrainCircuit,
   CircleDollarSign,
+  CreditCard,
   Gavel,
   GitBranch,
   HeartPulse,
@@ -62,6 +63,12 @@ const navItems = [
     label: "Audit Log",
     icon: ScrollText,
     requiredPermission: "audit.read",
+  },
+  {
+    href: "/dashboard/billing",
+    label: "Billing",
+    icon: CreditCard,
+    requiredPermission: "billing.read",
   },
 ];
 

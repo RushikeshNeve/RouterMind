@@ -178,6 +178,75 @@ export function registerBillingRoutes(
     },
   );
 
+  app.get(
+    "/v1/organizations/:organizationId/billing/overview",
+    { preHandler: requireOrganizationPermission(prisma, "billing.read", config) },
+    async (request, reply) => {
+      const params = orgParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return validation(reply);
+      }
+      const orgContext = request.rbacOrgContext!;
+      if (orgContext.organizationId !== params.data.organizationId) {
+        return reply
+          .status(403)
+          .send({ error: { message: "Caller does not have access to this organization." } });
+      }
+
+      const subscription = await prisma.subscription.findUnique({
+        where: { organizationId: orgContext.organizationId },
+        include: { plan: true },
+      });
+      // Same fallback as the plan_limit policy rule: an org with no
+      // Subscription row is implicitly on Free (Free never goes through
+      // Paddle checkout).
+      const plan =
+        subscription?.plan ?? (await prisma.plan.findUnique({ where: { name: "Free" } }));
+      if (!plan) {
+        return reply
+          .status(503)
+          .send({ error: { message: "No plans are configured -- run seed:plans first." } });
+      }
+
+      const { periodStart, periodEnd } = defaultUsagePeriod(
+        subscription
+          ? {
+              currentPeriodStart: subscription.currentPeriodStart,
+              currentPeriodEnd: subscription.currentPeriodEnd,
+            }
+          : null,
+      );
+      const usage = await computeUsageSummary(prisma, {
+        organizationId: orgContext.organizationId,
+        periodStart,
+        periodEnd,
+      });
+
+      return reply.status(200).send({
+        plan: {
+          name: plan.name,
+          priceCents: plan.priceCents,
+          includedRequests: plan.includedRequests,
+          featuresJson: plan.featuresJson,
+          selfServe: plan.paddlePriceId !== null,
+        },
+        subscription: subscription
+          ? {
+              status: subscription.status,
+              currentPeriodStart: subscription.currentPeriodStart?.toISOString() ?? null,
+              currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() ?? null,
+            }
+          : null,
+        usage: {
+          periodStart: periodStart.toISOString(),
+          periodEnd: periodEnd.toISOString(),
+          requestCount: usage.requestCount,
+          tokenCount: usage.tokenCount,
+        },
+      });
+    },
+  );
+
   // Encapsulated in its own plugin scope so the raw-body content-type
   // parser below only applies to this one route -- every other route in
   // the app keeps Fastify's default JSON body parsing untouched.

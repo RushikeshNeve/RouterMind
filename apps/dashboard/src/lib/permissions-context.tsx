@@ -20,6 +20,8 @@ const PERMISSION_MIN_ROLE: Record<string, string> = {
   "router.manage": "Admin",
   "policy.read": "Admin",
   "policy.manage": "Admin",
+  "billing.read": "Admin",
+  "billing.manage": "Owner",
   "budget.manage": "Owner",
   "workspace.manage": "Owner",
 };
@@ -32,12 +34,14 @@ export function permissionRequirementLabel(permission: string): string {
 interface PermissionsState {
   readonly permissions: ReadonlySet<string>;
   readonly roleName: string | undefined;
+  readonly organizationId: string | undefined;
   readonly isLoading: boolean;
 }
 
 const defaultState: PermissionsState = {
   permissions: new Set(),
   roleName: undefined,
+  organizationId: undefined,
   isLoading: true,
 };
 
@@ -49,7 +53,12 @@ export function PermissionsProvider({ children }: { readonly children: ReactNode
   useEffect(() => {
     const workspace = getActiveWorkspace();
     if (!workspace) {
-      setState({ permissions: new Set(), roleName: undefined, isLoading: false });
+      setState({
+        permissions: new Set(),
+        roleName: undefined,
+        organizationId: undefined,
+        isLoading: false,
+      });
       return;
     }
 
@@ -60,6 +69,7 @@ export function PermissionsProvider({ children }: { readonly children: ReactNode
         setState({
           permissions: new Set(result.permissions),
           roleName: result.role?.name,
+          organizationId: result.organizationId ?? undefined,
           isLoading: false,
         });
       })
@@ -68,7 +78,12 @@ export function PermissionsProvider({ children }: { readonly children: ReactNode
         // than blocking the dashboard -- the server still enforces every
         // action regardless of what the UI thinks it can show.
         if (cancelled) return;
-        setState({ permissions: new Set(), roleName: undefined, isLoading: false });
+        setState({
+          permissions: new Set(),
+          roleName: undefined,
+          organizationId: undefined,
+          isLoading: false,
+        });
       });
 
     return () => {

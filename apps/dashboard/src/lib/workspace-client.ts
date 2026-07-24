@@ -59,6 +59,7 @@ export interface MyWorkspacePermissions {
   readonly userId: string;
   readonly principalId: string;
   readonly workspaceId: string;
+  readonly organizationId: string | null;
   readonly role: { readonly id: string; readonly name: string } | null;
   readonly permissions: readonly string[];
 }
@@ -399,4 +400,55 @@ export function updatePolicy(
 
 export function deletePolicy(workspaceId: string, policyId: string): Promise<{ deleted: true }> {
   return requestJson(`/v1/workspaces/${workspaceId}/policies/${policyId}`, { method: "DELETE" });
+}
+
+export interface Plan {
+  readonly id: string;
+  readonly name: string;
+  readonly priceCents: number;
+  readonly includedRequests: number | null;
+  readonly featuresJson: Record<string, unknown>;
+  readonly selfServe: boolean;
+}
+
+export interface BillingOverview {
+  readonly plan: {
+    readonly name: string;
+    readonly priceCents: number;
+    readonly includedRequests: number | null;
+    readonly featuresJson: Record<string, unknown>;
+    readonly selfServe: boolean;
+  };
+  readonly subscription: { readonly status: string } | null;
+  readonly usage: {
+    readonly periodStart: string;
+    readonly periodEnd: string;
+    readonly requestCount: number;
+    readonly tokenCount: number;
+  };
+}
+
+export interface CheckoutResult {
+  readonly transactionId: string;
+  readonly clientToken: string | undefined;
+  readonly environment: "sandbox" | "production";
+}
+
+// Public, unauthenticated -- no workspace/organization context needed.
+export function listPlans(): Promise<{ plans: readonly Plan[] }> {
+  return requestJson(`/v1/plans`);
+}
+
+export function getBillingOverview(organizationId: string): Promise<BillingOverview> {
+  return requestJson(`/v1/organizations/${organizationId}/billing/overview`);
+}
+
+export function createBillingCheckout(
+  organizationId: string,
+  planName: string,
+): Promise<CheckoutResult> {
+  return requestJson(`/v1/organizations/${organizationId}/billing/checkout`, {
+    method: "POST",
+    body: { planName },
+  });
 }

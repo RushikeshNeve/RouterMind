@@ -41,11 +41,15 @@ export function registerMeRoutes(
       return reply.status(403).send({ error: { message: "Not a member of this workspace." } });
     }
 
-    const [role, rolePermissions] = await Promise.all([
+    const [role, rolePermissions, workspace] = await Promise.all([
       prisma.role.findUnique({ where: { id: context.roleId } }),
       prisma.rolePermission.findMany({
         where: { roleId: context.roleId },
         select: { permission: true },
+      }),
+      prisma.workspace.findUnique({
+        where: { id: context.workspaceId },
+        select: { organizationId: true },
       }),
     ]);
 
@@ -53,6 +57,7 @@ export function registerMeRoutes(
       userId: context.userId,
       principalId: context.principalId,
       workspaceId: context.workspaceId,
+      organizationId: workspace?.organizationId ?? null,
       role: role ? { id: role.id, name: role.name } : null,
       permissions: rolePermissions.map((rolePermission) => rolePermission.permission),
     };

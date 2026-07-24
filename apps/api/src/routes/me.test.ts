@@ -75,11 +75,16 @@ describe("GET /v1/workspaces/:id/me", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const body = parse<{ role: { name: string } | null; permissions: string[] }>(response);
+    const body = parse<{
+      role: { name: string } | null;
+      permissions: string[];
+      organizationId: string | null;
+    }>(response);
     expect(body.role?.name).toBe("Owner");
     expect(body.permissions).toEqual(
       expect.arrayContaining(["workspace.manage", "budget.manage", "audit.read"]),
     );
+    expect(body.organizationId).toBe(fixture.organizationId);
 
     await app.close();
     await cleanupFixture(prisma, fixture);

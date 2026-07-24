@@ -331,6 +331,75 @@ describe("billing routes", () => {
     });
   });
 
+  describe("GET /v1/organizations/:organizationId/billing/overview", () => {
+    it("returns the Free plan and zeroed usage when the org has no Subscription row", async () => {
+      await prisma.plan.upsert({
+        where: { name: "Free" },
+        create: { name: "Free", priceCents: 0, includedRequests: 10_000, featuresJson: {} },
+        update: {},
+      });
+      const fixture = await seedWorkspaceWithRole(prisma, "Owner");
+      fixtures.push(fixture);
+      const app = await billingTestApp();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixture.organizationId}/billing/overview`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        plan: { name: string; selfServe: boolean };
+        subscription: unknown;
+        usage: { requestCount: number };
+      };
+      expect(body.plan.name).toBe("Free");
+      expect(body.plan.selfServe).toBe(false);
+      expect(body.subscription).toBeNull();
+      expect(body.usage.requestCount).toBe(0);
+    });
+
+    it("returns the org's actual plan and subscription status when one exists", async () => {
+      const fixture = await seedWorkspaceWithRole(prisma, "Owner");
+      fixtures.push(fixture);
+      const plan = await seedPlan("pri_overview_test");
+      await prisma.subscription.create({
+        data: { organizationId: fixture.organizationId, planId: plan.id, status: "active" },
+      });
+      const app = await billingTestApp();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixture.organizationId}/billing/overview`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        plan: { name: string; selfServe: boolean };
+        subscription: { status: string } | null;
+      };
+      expect(body.plan.name).toBe(plan.name);
+      expect(body.plan.selfServe).toBe(true);
+      expect(body.subscription?.status).toBe("active");
+    });
+
+    it("rejects with 403 when caller lacks billing.read (Viewer)", async () => {
+      const fixture = await seedWorkspaceWithRole(prisma, "Viewer");
+      fixtures.push(fixture);
+      const app = await billingTestApp();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${fixture.organizationId}/billing/overview`,
+        headers: { "x-api-key": fixture.apiKey },
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+  });
+
   describe("POST /v1/webhooks/paddle", () => {
     it("rejects a request with an invalid signature", async () => {
       const app = await billingTestApp();
