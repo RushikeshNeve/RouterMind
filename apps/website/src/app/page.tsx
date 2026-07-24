@@ -7,6 +7,7 @@ import { Hero } from "../components/landing/hero";
 import { HowItWorks } from "../components/landing/how-it-works";
 import { LiveLinks } from "../components/landing/live-links";
 import { Navbar } from "../components/landing/navbar";
+import { Pricing } from "../components/landing/pricing";
 import { Screenshots } from "../components/landing/screenshots";
 import { TrustSection } from "../components/landing/trust-section";
 import { Playground } from "../components/playground/Playground";
@@ -18,6 +19,7 @@ export default function HomePage() {
       <Hero />
       <TrustSection />
       <Features />
+      <Pricing />
       <Playground />
       <Architecture />
       <HowItWorks />
