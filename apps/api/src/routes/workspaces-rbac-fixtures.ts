@@ -7,6 +7,7 @@ import type { ApiConfig } from "../config.js";
 import { InMemoryAnalyticsService } from "../infrastructure/analytics-service.js";
 import { PrismaApiKeyAuthenticator } from "../infrastructure/authenticator.js";
 import { CostGuardrailService } from "../infrastructure/cost-guardrail-service.js";
+import type { EmailSender } from "../infrastructure/email-sender.js";
 import type { EvaluationService } from "../infrastructure/evaluation-service.js";
 import type { PaddleClient } from "../infrastructure/paddle-client.js";
 import { InMemoryExecutionPlanLogStore } from "../infrastructure/execution-plan-log-store.js";
@@ -235,6 +236,7 @@ export async function createPrismaWorkspaceTestApp(
     readonly executionPlanLogStore?: InMemoryExecutionPlanLogStore;
     readonly evaluationService?: EvaluationService;
     readonly routerLLMServiceFactory?: Parameters<typeof buildApp>[0]["routerLLMServiceFactory"];
+    readonly emailSender?: EmailSender;
   } = {},
 ) {
   const workspaceService = new PrismaWorkspaceService(prisma);
@@ -277,6 +279,7 @@ export async function createPrismaWorkspaceTestApp(
     executionPlanLogStore: options.executionPlanLogStore,
     evaluationService: options.evaluationService,
     routerLLMServiceFactory: options.routerLLMServiceFactory,
+    emailSender: options.emailSender,
   });
   return { app, workspaceService };
 }
