@@ -14,7 +14,7 @@ This plan ties together the three prior conversations: the architecture review, 
 
 **What "product" means concretely**: a stranger can discover RouteMind, understand what it's for in one sentence, sign up, hit their first budget/RBAC/routing constraint, pay for it, and trust it enough to route real traffic — all without talking to you. Every phase below exists to make one more piece of that sentence true.
 
-**Current phase:** Phase 1 — Productization. Phase 0's Ship list is complete (see below); do not build Phase 2+ features until Phase 1's own Ship list is checked here first.
+**Current phase:** Phase 2 — Trust & Differentiation (see `docs/phase-2-plan.md`). Phase 1's checklist (all 10 items) plus its exit-criteria test are complete (see below); Phase 0's Ship list was complete before that.
 
 ---
 
@@ -199,6 +199,10 @@ This is where you stop being "another gateway" and start being _the_ gateway wit
 **Exit criteria:** you can point to a real (even if small) customer paying real money, on a plan whose price they predicted correctly before the invoice arrived, using BYO router credentials — i.e., every clause in your positioning statement is demonstrably true for at least one real workspace, not just true in the codebase.
 
 **Why this order:** USPs are marketing claims until someone outside your team relies on them. Phase 2 is the phase where "differentiator" changes from a slide in a review doc to a thing a paying customer would vouch for.
+
+### Session log
+
+- **2026-08-16**: Created `docs/phase-2-plan.md`, converting this section's Ship list into a concrete checklist, and flipped this file's "Current phase" line from Phase 1 to Phase 2. **Investigated before writing a single checklist item, per standing practice**: two of the four Ship-list lines turned out to already be fully shipped as a side effect of earlier phases' work, verified directly (not just via an explorer report) rather than assumed — checked off immediately in `phase-2-plan.md` with the evidence, not silently dropped from the list. (1) "Harden BYO Router Model: explicit, surfaced fallback behavior" — `routemind.routing.reason`/`routingMetadata.configSource` are populated on every `/v1/chat/completions` response, with four distinct, exported fallback-reason constants in `packages/routing/src/index.ts`, all landed 2026-07-19 during Phase 0's evaluations work, unrelated to Phase 2 being declared at the time. (2) "Rate limiting distinct from budgets" — `apps/api/src/infrastructure/rate-limiter.ts` is genuinely live-wired into `/v1/chat/completions` (runs before cost-guardrail checks, real `429`s, real `x-ratelimit-*` headers) with a hardcoded 100 req/hour per API key; this satisfied the roadmap's literal wording ("distinct from budgets") even though the limit isn't yet configurable per plan tier — flagged as a known limitation, not treated as blocking. **Real, confirmed gap for the two remaining checklist items**: `LLMResponseCache` persists the full `promptText` and `responseJson` of every cached request in Postgres indefinitely, with zero workspace-level control — no retention-policy table, no opt-out, nothing (`RequestLog` itself only ever stored metadata, not content, so the cache table is where the actual sensitive data lives). This is item 3 on the new checklist, the first genuinely unchecked item. Item 4 (honest pricing/trust-page messaging about data handling) is ordered after it, since it can't honestly describe a toggle that doesn't exist yet. The GTM/business bullets (design partners, case studies, competitor watching) were kept out of the numbered checklist entirely and moved to their own non-code section, matching the roadmap's own Ship/Business-GTM separation — `/phase-next` runs code slices, and those items aren't code. **Not done**: item 3 itself — this session log entry is phase-transition bookkeeping, not a shipped slice; the actual first `/phase-next` implementation slice for Phase 2 starts next.
 
 ---
 
