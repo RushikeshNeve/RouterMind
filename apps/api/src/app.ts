@@ -69,6 +69,10 @@ import {
 import { LiveRouterLLMService, MockRouterLLMService } from "./infrastructure/router-llm-service.js";
 import { PrismaRouterConfigLookup } from "./infrastructure/router-config-lookup.js";
 import {
+  PrismaPromptLoggingPolicyLookup,
+  type PromptLoggingPolicyLookup,
+} from "./infrastructure/prompt-logging-policy.js";
+import {
   StaticUserAvailabilityStore,
   createDefaultAvailability,
   type UserAvailabilityStore,
@@ -95,6 +99,7 @@ import { registerPolicyRoutes } from "./routes/policy.js";
 import { registerBillingRoutes } from "./routes/billing.js";
 import { registerPlanRoutes } from "./routes/plans.js";
 import { registerRouterConfigRoutes } from "./routes/router-config.js";
+import { registerPromptLoggingRoutes } from "./routes/prompt-logging.js";
 import { registerServiceAccountRoutes } from "./routes/service-accounts.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { ConsoleEmailSender, type EmailSender } from "./infrastructure/email-sender.js";
@@ -117,6 +122,7 @@ export interface BuildAppOptions {
   executionPlanLogStore?: ExecutionPlanLogStore;
   evaluationService?: EvaluationService;
   cacheService?: CacheService;
+  promptLoggingPolicyLookup?: PromptLoggingPolicyLookup;
   promptFirewallService?: PromptFirewallService;
   workspaceService?: WorkspaceService;
   prisma?: PrismaClient;
@@ -225,6 +231,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await prisma.$disconnect();
     }
   });
+  const promptLoggingPolicyLookup =
+    options.promptLoggingPolicyLookup ?? new PrismaPromptLoggingPolicyLookup(prisma);
   const analyticsService =
     options.analyticsService ??
     (requestLogStore instanceof InMemoryRequestLogStore &&
@@ -258,6 +266,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     prisma,
   });
   registerRouterConfigRoutes(app, {
+    config: options.config,
+    prisma,
+  });
+  registerPromptLoggingRoutes(app, {
     config: options.config,
     prisma,
   });
@@ -338,6 +350,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     executionPlanLogStore,
     evaluationService,
     cacheService,
+    promptLoggingPolicyLookup,
     promptFirewallService,
     tracer: options.tracer ?? new NoopTracer(),
     retryPolicyService: options.retryPolicyService ?? new RetryPolicyService(),

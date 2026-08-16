@@ -36,6 +36,7 @@ import type {
   FirewallInspectionResult,
   PromptFirewallService,
 } from "../infrastructure/prompt-firewall-service.js";
+import type { PromptLoggingPolicyLookup } from "../infrastructure/prompt-logging-policy.js";
 import {
   ProviderErrorClassifier,
   type ProviderErrorType,
@@ -127,6 +128,7 @@ export interface ChatCompletionDependencies {
   readonly executionPlanLogStore: ExecutionPlanLogStore;
   readonly evaluationService: EvaluationService;
   readonly cacheService: CacheService;
+  readonly promptLoggingPolicyLookup: PromptLoggingPolicyLookup;
   readonly promptFirewallService: PromptFirewallService;
   readonly tracer: Tracer;
   readonly retryPolicyService: RetryPolicyService;
@@ -337,10 +339,14 @@ export function registerChatCompletionRoutes(
       }
 
       const effectiveMessages = firewall.sanitizedMessages;
+      const promptLoggingEnabled = await dependencies.promptLoggingPolicyLookup.isEnabled(
+        user.workspaceId,
+      );
       const cachePlan = buildCachePlan(
         parsed.data.cache,
         parsed.data.stream,
         parsed.data.temperature,
+        promptLoggingEnabled,
       );
       const cacheKey =
         cachePlan.lookupMode === "exact"
@@ -992,7 +998,12 @@ export function registerChatCompletionRoutes(
 
       if (
         cacheKey &&
-        shouldStoreCache(parsed.data.cache, parsed.data.stream, parsed.data.temperature) &&
+        shouldStoreCache(
+          parsed.data.cache,
+          parsed.data.stream,
+          parsed.data.temperature,
+          promptLoggingEnabled,
+        ) &&
         !hasUnsupportedToolCalls(responseWithCacheMetadata)
       ) {
         await dependencies.cacheService.setExactCache({
@@ -1072,9 +1083,16 @@ function buildCachePlan(
   options: CacheRequestOptions,
   stream: boolean,
   temperature?: number,
+  promptLoggingEnabled = true,
 ): CachePlan {
   const requestedMode = options.mode ?? "exact";
-  if (requestedMode === "disabled" || options.bypass || stream || (temperature ?? 0) > 0.7) {
+  if (
+    requestedMode === "disabled" ||
+    options.bypass ||
+    stream ||
+    (temperature ?? 0) > 0.7 ||
+    !promptLoggingEnabled
+  ) {
     return { requestedMode };
   }
 
@@ -1089,8 +1107,9 @@ function shouldStoreCache(
   options: CacheRequestOptions,
   stream: boolean,
   temperature?: number,
+  promptLoggingEnabled = true,
 ): boolean {
-  return Boolean(buildCachePlan(options, stream, temperature).lookupMode);
+  return Boolean(buildCachePlan(options, stream, temperature, promptLoggingEnabled).lookupMode);
 }
 
 function attachCacheMetadata(

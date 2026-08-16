@@ -9,6 +9,7 @@ import {
   BrainCircuit,
   CircleDollarSign,
   CreditCard,
+  Database,
   Gavel,
   GitBranch,
   HeartPulse,
@@ -69,6 +70,12 @@ const navItems = [
     label: "Billing",
     icon: CreditCard,
     requiredPermission: "billing.read",
+  },
+  {
+    href: "/dashboard/data-retention",
+    label: "Data Retention",
+    icon: Database,
+    requiredPermission: "dataRetention.read",
   },
 ];
 

@@ -16,44 +16,44 @@ model GatewayMetadata {
 }
 
 model RequestLog {
-  id                          String   @id @default(cuid())
-  workspaceId                 String?
-  apiKey                      String
-  requestedModel              String
-  selectedModel               String?
-  provider                    String?
-  inputTokens                 Int?
-  outputTokens                Int?
-  estimatedCost               Float?
-  latencyMs                   Int
-  status                      String
-  errorMessage                String?
-  providerStatusAtRouting     String?
-  providerAvgLatencyAtRouting Int?
+  id                           String               @id @default(cuid())
+  workspaceId                  String?
+  apiKey                       String
+  requestedModel               String
+  selectedModel                String?
+  provider                     String?
+  inputTokens                  Int?
+  outputTokens                 Int?
+  estimatedCost                Float?
+  latencyMs                    Int
+  status                       String
+  errorMessage                 String?
+  providerStatusAtRouting      String?
+  providerAvgLatencyAtRouting  Int?
   providerSuccessRateAtRouting Float?
-  routingMode                 String?
-  routingStrategy             String?
-  createdAt                   DateTime @default(now())
-  routerDecisions  RouterDecisionLog[]
-  providerAttempts ProviderAttemptLog[]
-  executionPlans   ExecutionPlanLog[]
-  firewallEvents   FirewallEvent[]
+  routingMode                  String?
+  routingStrategy              String?
+  createdAt                    DateTime             @default(now())
+  routerDecisions              RouterDecisionLog[]
+  providerAttempts             ProviderAttemptLog[]
+  executionPlans               ExecutionPlanLog[]
+  firewallEvents               FirewallEvent[]
 
   @@index([workspaceId])
 }
 
 model CircuitBreakerState {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   provider      String
   model         String
-  state         String   @default("CLOSED")
-  failureCount  Int      @default(0)
+  state         String    @default("CLOSED")
+  failureCount  Int       @default(0)
   openedAt      DateTime?
   halfOpenAt    DateTime?
   lastFailureAt DateTime?
   lastSuccessAt DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@unique([provider, model])
   @@index([provider])
@@ -61,19 +61,19 @@ model CircuitBreakerState {
 }
 
 model ProviderAttemptLog {
-  id           String   @id @default(cuid())
-  requestLogId String?
-  workspaceId  String?
-  userId       String
-  provider     String
-  model        String
+  id            String      @id @default(cuid())
+  requestLogId  String?
+  workspaceId   String?
+  userId        String
+  provider      String
+  model         String
   attemptNumber Int
-  status       String
-  latencyMs    Int
-  errorType    String?
-  errorMessage String?
-  createdAt    DateTime @default(now())
-  requestLog   RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+  status        String
+  latencyMs     Int
+  errorType     String?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  requestLog    RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
 
   @@index([requestLogId])
   @@index([userId])
@@ -130,7 +130,7 @@ model ProviderHealthMetric {
 }
 
 model RouterDecisionLog {
-  id                  String   @id @default(cuid())
+  id                  String      @id @default(cuid())
   requestLogId        String?
   workspaceId         String?
   userId              String
@@ -143,8 +143,8 @@ model RouterDecisionLog {
   selectedProvider    String?
   confidence          Float?
   reason              String?
-  fallbackUsed        Boolean  @default(false)
-  createdAt           DateTime @default(now())
+  fallbackUsed        Boolean     @default(false)
+  createdAt           DateTime    @default(now())
   requestLog          RequestLog? @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
 
   @@index([requestLogId])
@@ -162,8 +162,8 @@ model User {
   providerCredentials ProviderCredential[]
   modelAccess         UserModelAccess[]
   budgets             UserBudget[]
-  quotas                UsageQuota[]
-  workspaceMembers      WorkspaceMember[]
+  quotas              UsageQuota[]
+  workspaceMembers    WorkspaceMember[]
   principal           Principal?           @relation(fields: [principalId], references: [id], onDelete: SetNull)
   serviceAccounts     ServiceAccount[]
   loginTokens         LoginToken[]
@@ -178,14 +178,14 @@ model User {
 /// as WorkspaceInvite), and verify creates the User/Principal/Organization/
 /// Workspace on first use.
 model LoginToken {
-  id         String    @id @default(cuid())
-  userId     String?
-  email      String?
-  tokenHash  String    @unique
-  expiresAt  DateTime
-  usedAt     DateTime?
-  createdAt  DateTime  @default(now())
-  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(cuid())
+  userId    String?
+  email     String?
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -466,21 +466,28 @@ model Principal {
 }
 
 model Workspace {
-  id                  String               @id @default(cuid())
-  name                String
-  slug                String               @unique
-  organizationId      String?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  organization        Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  members             WorkspaceMember[]
-  memberships         Membership[]
-  apiKeys             ApiKey[]
-  providerCredentials ProviderCredential[]
-  modelAccess         UserModelAccess[]
-  auditEvents         AuditEvent[]
-  invites             WorkspaceInvite[]
-  policies            Policy[]
+  id                   String               @id @default(cuid())
+  name                 String
+  slug                 String               @unique
+  organizationId       String?
+  // Default true so existing behavior is unchanged for every workspace
+  // until an operator explicitly opts out. When false, chat-completions.ts
+  // skips response-cache persistence entirely for this workspace's
+  // requests -- caching inherently requires storing the prompt/response
+  // to reuse it later, so "don't retain my prompts" and "no caching" are
+  // the same guarantee here, not two separate mechanisms.
+  promptLoggingEnabled Boolean              @default(true)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  organization         Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  members              WorkspaceMember[]
+  memberships          Membership[]
+  apiKeys              ApiKey[]
+  providerCredentials  ProviderCredential[]
+  modelAccess          UserModelAccess[]
+  auditEvents          AuditEvent[]
+  invites              WorkspaceInvite[]
+  policies             Policy[]
 
   @@index([organizationId])
 }
@@ -494,14 +501,14 @@ model Workspace {
 /// the schema level -- same tradeoff as RouterConfig.scopeId and
 /// WorkspaceInvite's email-only path.
 model Policy {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
   subjectType String
   subjectId   String
   ruleType    String
   ruleJson    Json
-  priority    Int      @default(0)
-  createdAt   DateTime @default(now())
+  priority    Int       @default(0)
+  createdAt   DateTime  @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
@@ -532,12 +539,12 @@ model WorkspaceInvite {
 }
 
 model WorkspaceMember {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
   userId      String
   role        String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 

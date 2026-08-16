@@ -485,3 +485,21 @@ export function createBillingCheckout(
     body: { planName },
   });
 }
+
+export interface PromptLoggingSetting {
+  readonly promptLoggingEnabled: boolean;
+}
+
+export function getPromptLoggingSetting(workspaceId: string): Promise<PromptLoggingSetting> {
+  return requestJson(`/v1/workspaces/${workspaceId}/prompt-logging`);
+}
+
+export function updatePromptLoggingSetting(
+  workspaceId: string,
+  promptLoggingEnabled: boolean,
+): Promise<PromptLoggingSetting> {
+  return requestJson(`/v1/workspaces/${workspaceId}/prompt-logging`, {
+    method: "PATCH",
+    body: { promptLoggingEnabled },
+  });
+}

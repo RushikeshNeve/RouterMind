@@ -22,6 +22,8 @@ const PERMISSION_MIN_ROLE: Record<string, string> = {
   "policy.manage": "Admin",
   "billing.read": "Admin",
   "billing.manage": "Owner",
+  "dataRetention.read": "Admin",
+  "dataRetention.manage": "Admin",
   "budget.manage": "Owner",
   "workspace.manage": "Owner",
 };

@@ -6,7 +6,9 @@ import { buildApp } from "../app.js";
 import type { ApiConfig } from "../config.js";
 import { InMemoryAnalyticsService } from "../infrastructure/analytics-service.js";
 import { PrismaApiKeyAuthenticator } from "../infrastructure/authenticator.js";
+import { InMemoryCacheService, type CacheService } from "../infrastructure/cache-service.js";
 import { CostGuardrailService } from "../infrastructure/cost-guardrail-service.js";
+import type { PromptLoggingPolicyLookup } from "../infrastructure/prompt-logging-policy.js";
 import type { EmailSender } from "../infrastructure/email-sender.js";
 import type { EvaluationService } from "../infrastructure/evaluation-service.js";
 import type { PaddleClient } from "../infrastructure/paddle-client.js";
@@ -237,9 +239,12 @@ export async function createPrismaWorkspaceTestApp(
     readonly evaluationService?: EvaluationService;
     readonly routerLLMServiceFactory?: Parameters<typeof buildApp>[0]["routerLLMServiceFactory"];
     readonly emailSender?: EmailSender;
+    readonly cacheService?: CacheService;
+    readonly promptLoggingPolicyLookup?: PromptLoggingPolicyLookup;
   } = {},
 ) {
   const workspaceService = new PrismaWorkspaceService(prisma);
+  const cacheService = options.cacheService ?? new InMemoryCacheService();
   const authenticator = new PrismaApiKeyAuthenticator(prisma, testConfig.DEV_API_KEY);
   const provider: ProviderAdapter = {
     providerName: "openai",
@@ -280,6 +285,8 @@ export async function createPrismaWorkspaceTestApp(
     evaluationService: options.evaluationService,
     routerLLMServiceFactory: options.routerLLMServiceFactory,
     emailSender: options.emailSender,
+    cacheService,
+    promptLoggingPolicyLookup: options.promptLoggingPolicyLookup,
   });
-  return { app, workspaceService };
+  return { app, workspaceService, cacheService };
 }
