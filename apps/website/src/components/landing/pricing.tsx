@@ -201,6 +201,15 @@ export function Pricing() {
           })}
         </div>
       )}
+      <FadeIn>
+        <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-slate-500">
+          Prompt logging is a workspace-level toggle included on every plan, on by default -- see{" "}
+          <a href="#data-handling" className="font-medium text-blue-600 hover:underline">
+            Data &amp; Trust
+          </a>{" "}
+          for what that actually does.
+        </p>
+      </FadeIn>
     </Section>
   );
 }

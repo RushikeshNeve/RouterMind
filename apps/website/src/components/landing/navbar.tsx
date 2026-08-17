@@ -9,6 +9,7 @@ import { ButtonLink } from "./section";
 const nav = [
   { label: "Features", href: "#features" },
   { label: "Pricing", href: "#pricing" },
+  { label: "Data & Trust", href: "#data-handling" },
   { label: "Architecture", href: "#architecture" },
   { label: "Documentation", href: links.docs },
   { label: "SDK", href: links.sdk },

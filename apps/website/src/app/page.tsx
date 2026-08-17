@@ -1,6 +1,7 @@
 import { Architecture } from "../components/landing/architecture";
 import { CodeExamples } from "../components/landing/code-examples";
 import { CTA } from "../components/landing/cta";
+import { DataHandling } from "../components/landing/data-handling";
 import { Features } from "../components/landing/features";
 import { Footer } from "../components/landing/footer";
 import { Hero } from "../components/landing/hero";
@@ -20,6 +21,7 @@ export default function HomePage() {
       <TrustSection />
       <Features />
       <Pricing />
+      <DataHandling />
       <Playground />
       <Architecture />
       <HowItWorks />
